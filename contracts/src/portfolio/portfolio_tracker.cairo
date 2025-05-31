@@ -21,6 +21,7 @@ use zeroable::Zeroable;
 use traits::Into;
 use box::BoxTrait;
 use option::OptionTrait;
+use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Asset struct & Storage
@@ -47,6 +48,12 @@ struct Storage {
 // ─────────────────────────────────────────────────────────────────────────────
 // Replace 0x012345 with the real address from your deploy!
 const ANALYTICS_ADDRESS: ContractAddress = ContractAddressConst::<0x012345>();
+
+// Metadata constants
+const CONTRACT_VERSION: felt252 = '1.0.0';
+const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#portfolio-tracker';
+const INTERFACE_PORTFOLIO: felt252 = 'IPortfolioTracker';
+const DEPENDENCY_ANALYTICS: felt252 = 'IAnalytics';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTRACT MODULE
@@ -189,6 +196,33 @@ mod PortfolioTracker {
             // }
 
             total
+        }
+    }
+
+    // ----------------------------
+    // Metadata
+    // ----------------------------
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_PORTFOLIO);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ANALYTICS);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_PORTFOLIO {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
 }

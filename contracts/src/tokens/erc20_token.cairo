@@ -15,6 +15,16 @@ mod ERC20Token {
     use starknet::storage::Map;
     use zeroable::Zeroable;
     use crate::interfaces::i_erc20::IERC20;
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+    use array::ArrayTrait;
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#erc20-token';
+    const INTERFACE_ERC20: felt252 = 'IERC20';
+    const INTERFACE_ERC20_EXT: felt252 = 'IERC20Extended';
+    // Add more interface IDs as needed
+    const DEPENDENCY_NONE: felt252 = 'None';
 
     #[storage]
     struct Storage {
@@ -531,6 +541,31 @@ mod ERC20Token {
 
         fn _assert_not_paused(self: @ContractState) {
             assert(!self.paused.read(), ERROR_PAUSED);
+        }
+    }
+
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_ERC20);
+            interfaces.append(INTERFACE_ERC20_EXT);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_NONE);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_ERC20 || interface_id == INTERFACE_ERC20_EXT {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
 }
