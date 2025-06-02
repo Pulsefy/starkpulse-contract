@@ -3,9 +3,16 @@ mod UserAuth {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use starknet::storage::Map;
     use zeroable::Zeroable;
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
     use array::ArrayTrait;
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
     use contracts::src::interfaces::i_user_auth::{IUserAuth, UserProfile, Session, UserAuthTypes};
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#user-auth';
+    const INTERFACE_USER_AUTH: felt252 = 'IUserAuth';
+    const DEPENDENCY_ACCESS_CONTROL: felt252 = 'IAccessControl';
 
     // Constants for session status
     const SESSION_ACTIVE: felt252 = 'ACTIVE';
@@ -531,6 +538,30 @@ mod UserAuth {
                         timestamp: current_time,
                     });
                 }
+            }
+        }
+    }
+    
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_USER_AUTH);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ACCESS_CONTROL);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_USER_AUTH {
+                (1,)
+            } else {
+                (0,)
             }
         }
     }

@@ -13,6 +13,8 @@ mod TokenVesting {
     use starknet::storage::Map;
     use core::num::traits::Bounded;
     use zeroable::Zeroable;
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+    use array::ArrayTrait;
     
     // Local interfaces
     use crate::interfaces::i_token_vesting::{TokenVestingTypes, ITokenVestingContract};
@@ -97,6 +99,12 @@ mod TokenVesting {
     const ERROR_SCHEDULE_REVOKED: felt252 = 'Schedule already revoked';
     const ERROR_INVALID_SCHEDULE_ID: felt252 = 'Invalid schedule ID';
     const ERROR_ARITHMETIC_OVERFLOW: felt252 = 'Arithmetic overflow';
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#token-vesting';
+    const INTERFACE_VESTING: felt252 = 'ITokenVestingContract';
+    const DEPENDENCY_ERC20: felt252 = 'IERC20';
 
     #[constructor]
     fn constructor(ref self: ContractState, admin_address: ContractAddress, token_address: ContractAddress) {
@@ -381,6 +389,30 @@ mod TokenVesting {
             }
             
             vested_amount - schedule.released_amount
+        }
+    }
+    
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_VESTING);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ERC20);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_VESTING {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
 }

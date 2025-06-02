@@ -3,9 +3,16 @@ mod TransactionMonitor {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use starknet::storage::Map;
     use zeroable::Zeroable;
-    use array::ArrayTrait;
     use contracts::src::interfaces::i_transaction_monitor::{ITransactionMonitor, Transaction, TransactionMonitorTypes};
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+    use array::ArrayTrait;
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#transaction-monitor';
+    const INTERFACE_TX_MONITOR: felt252 = 'ITransactionMonitor';
+    const DEPENDENCY_ACCESS_CONTROL: felt252 = 'IAccessControl';
 
     // Constants for transaction status
     const STATUS_PENDING: felt252 = 'PENDING';
@@ -311,6 +318,30 @@ mod TransactionMonitor {
             assert(transaction.tx_hash != 0, "Transaction does not exist");
             
             transaction
+        }
+    }
+    
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_TX_MONITOR);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ACCESS_CONTROL);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_TX_MONITOR {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
     
