@@ -127,7 +127,7 @@ end
 use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
 use array::ArrayTrait;
 
-// Metadata constants
+// Metadata constant
 const CONTRACT_VERSION: felt252 = '1.0.0';
 const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#analytics-store';
 const INTERFACE_ANALYTICS: felt252 = 'IAnalytics';
