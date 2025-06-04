@@ -1,4 +1,3 @@
-          
 # StarkPulse Contract ⚡🔒
 
 StarkPulse is a cutting-edge, decentralized crypto news aggregator and portfolio management platform built on the StarkNet ecosystem. This repository contains the smart contract code that powers the StarkPulse platform.
@@ -25,8 +24,8 @@ The StarkPulse contract provides the backbone for secure user authentication, po
 ## Project Structure
 
 ```
-contracts/ 
- ├── src/ 
+contracts/
+ ├── src/
  │   ├── auth/ - User authentication and session management
  │   ├── portfolio/ - Portfolio tracking and asset management
  │   ├── transactions/ - Transaction monitoring and notifications
@@ -50,17 +49,20 @@ contracts/
 ### Installation
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/Pulsefy/starkpulse-contract.git
 cd starkpulse-contract
 ```
 
 2. Build the contracts:
+
 ```bash
 scarb build
 ```
 
 3. Run tests:
+
 ```bash
 scarb test
 ```
@@ -93,3 +95,31 @@ We welcome contributions to StarkPulse! Please follow these steps:
 - Cedarich 👨‍💻
 
 Built with ❤️ by the StarkPulse Team
+
+## Simulation & Scenario Testing Utilities
+
+The StarkPulse contract suite includes advanced simulation tools for pre-deployment testing and contract interaction analysis. These utilities are located in `contracts/src/simulation/` and provide:
+
+- **Transaction Simulation:** Emulate contract calls and predict outcomes before actual execution.
+- **State Manipulation:** Take and restore contract state snapshots, or set state for testing.
+- **Scenario Orchestration:** Define and run sequences of contract interactions to validate complex workflows.
+- **Result Analysis & Reporting:** Capture events, estimate gas, and generate detailed simulation reports.
+
+### Usage Example
+
+1. **Simulate a Transaction**
+
+   - Use `simulate_transaction_full` from `transaction_simulator.cairo` to emulate a contract call and get a detailed report.
+
+2. **Manipulate State**
+
+   - Use `state_manipulator.cairo` to snapshot, restore, or set contract state for comprehensive scenario coverage.
+
+3. **Run a Scenario**
+
+   - Use `scenario_runner.cairo` to define a sequence of contract calls and analyze the results for all steps.
+
+4. **View Reports**
+   - Simulation reports include transaction results, events, and gas usage for easy debugging and optimization.
+
+See the `contracts/src/simulation/` directory and test files for more detailed examples and integration patterns.
