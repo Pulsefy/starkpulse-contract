@@ -1,3 +1,55 @@
+// -----------------------------------------------------------------------------
+// StarkPulse ERC20 Token Implementation
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract implements a secure, feature-rich ERC20 token for StarkNet.
+//
+// Features:
+// - Full ERC20 compliance (transfer, approve, allowance, etc.)
+// - Minting and burning with role-based access control
+// - Emergency pause/unpause by owner
+// - Max supply enforcement
+// - Ownership transfer and minter management
+// - Comprehensive security validations
+//
+// Security Considerations:
+// - Only designated minters can mint new tokens; only owner can add/remove minters.
+// - Transfers, minting, and burning are blocked when the contract is paused.
+// - All critical functions validate caller permissions and input values.
+// - Zero address checks prevent accidental token loss.
+// - Max supply is enforced on minting.
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let token = ERC20Token.deploy(
+//     name='StarkPulse',
+//     symbol='SPT',
+//     decimals=18,
+//     initial_supply=1000000,
+//     max_supply=10000000,
+//     owner=OWNER_ADDRESS,
+//     mintable=true,
+//     burnable=true
+// );
+//
+// // Transferring tokens:
+// token.transfer(RECIPIENT_ADDRESS, 100);
+//
+// // Minting tokens (as minter):
+// token.mint(USER_ADDRESS, 500);
+//
+// // Burning tokens:
+// token.burn(50);
+//
+// // Pausing/unpausing (as owner):
+// token.pause();
+// token.unpause();
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 // StarkPulse ERC20 Token Implementation
 // A complete, secure ERC20 token contract with all standard functionality
 // 
@@ -29,21 +81,30 @@ mod ERC20Token {
     #[storage]
     struct Storage {
         // Token metadata
+        // name: The name of the token (e.g., 'StarkPulse')
+        // symbol: The token symbol (e.g., 'SPT')
+        // decimals: Number of decimals the token uses (e.g., 18)
+        // total_supply: Current total supply of tokens
         name: felt252,
         symbol: felt252,
         decimals: u8,
         total_supply: u256,
         
-        // Balance and allowance mappings
+        // balances: Mapping from address to token balance
+        // allowances: Mapping from (owner, spender) to allowance amount
         balances: Map<ContractAddress, u256>,
         allowances: Map<(ContractAddress, ContractAddress), u256>,
         
-        // Admin controls
+        // owner: The contract owner (has admin privileges)
+        // minters: Mapping from address to minter status (true/false)
+        // paused: If true, all token transfers are paused
         owner: ContractAddress,
         minters: Map<ContractAddress, bool>,
         paused: bool,
         
-        // Additional features
+        // max_supply: Maximum allowed total supply (0 = unlimited)
+        // mintable: If true, tokens can be minted
+        // burnable: If true, tokens can be burned
         max_supply: u256,
         mintable: bool,
         burnable: bool,
@@ -129,6 +190,17 @@ mod ERC20Token {
     const ERROR_ZERO_ADDRESS: felt252 = 'ERC20: zero address';
 
     #[constructor]
+    /// Contract constructor
+    /// @param name_ The name of the token (e.g., 'StarkPulse')
+    /// @param symbol_ The token symbol (e.g., 'SPT')
+    /// @param decimals_ Number of decimals the token uses (e.g., 18)
+    /// @param initial_supply Initial token supply to mint to owner
+    /// @param max_supply_ Maximum allowed total supply (0 = unlimited)
+    /// @param owner_ The address that will be the contract owner
+    /// @param mintable_ If true, tokens can be minted after deployment
+    /// @param burnable_ If true, tokens can be burned
+    /// @dev Owner is set as initial minter if mintable is true. Emits Transfer and MinterAdded events.
+    /// @security Only the provided owner_ will have admin rights. Ensure this is a trusted address.
     fn constructor(
         ref self: ContractState,
         name_: felt252,
@@ -221,7 +293,8 @@ mod ERC20Token {
         /// @param recipient The address to transfer tokens to
         /// @param amount The amount of tokens to transfer
         /// @return true if the transfer was successful
-        /// Emits a Transfer event
+        /// @dev Emits a Transfer event. Fails if contract is paused, sender has insufficient balance, or recipient is zero address.
+        /// @security Only unpaused contract allows transfers. Always checks for sufficient balance and valid recipient.
         fn transfer(ref self: ContractState, recipient: ContractAddress, amount: u256) -> bool {
             let sender = get_caller_address();
             self._transfer(sender, recipient, amount);
@@ -233,8 +306,8 @@ mod ERC20Token {
         /// @param recipient The address to transfer tokens to
         /// @param amount The amount of tokens to transfer
         /// @return true if the transfer was successful
-        /// Requires sufficient allowance if caller is not the sender
-        /// Emits a Transfer event
+        /// @dev Requires sufficient allowance if caller is not the sender. Emits a Transfer event.
+        /// @security Checks allowance, sender/recipient validity, and contract pause state.
         fn transfer_from(
             ref self: ContractState, 
             sender: ContractAddress, 
@@ -260,7 +333,8 @@ mod ERC20Token {
         /// @param spender The address to approve for spending
         /// @param amount The amount of tokens to approve
         /// @return true if the approval was successful
-        /// Emits an Approval event
+        /// @dev Emits an Approval event. Overwrites previous allowance.
+        /// @security Spender must not be zero address. Caller is always the owner of the tokens.
         fn approve(ref self: ContractState, spender: ContractAddress, amount: u256) -> bool {
             let owner = get_caller_address();
             self._approve(owner, spender, amount);
@@ -293,8 +367,8 @@ mod ERC20Token {
         /// @param to The address to mint tokens to
         /// @param amount The amount of tokens to mint
         /// @return true if minting was successful
-        /// Requires: caller must be a minter, contract not paused, within max supply
-        /// Emits Transfer and Mint events
+        /// @dev Emits Transfer and Mint events. Checks max supply if set.
+        /// @security Only minters can call. Fails if paused, not mintable, or exceeds max supply.
         fn mint(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
             self._assert_only_minter();
             self._assert_not_paused();
@@ -334,14 +408,20 @@ mod ERC20Token {
         /// Burns tokens from the caller's balance
         /// @param amount The amount of tokens to burn
         /// @return true if burning was successful
-        /// Requires: sufficient balance, contract not paused, token is burnable
-        /// Emits Transfer and Burn events
+        /// @dev Emits Transfer and Burn events. Fails if not burnable or paused.
+        /// @security Only token holders can burn their own tokens. Checks sufficient balance.
         fn burn(ref self: ContractState, amount: u256) -> bool {
             let caller = get_caller_address();
             self._burn(caller, amount);
             true
         }
 
+        /// Burns tokens from another account using allowance
+        /// @param from The address to burn tokens from
+        /// @param amount The amount of tokens to burn
+        /// @return true if burning was successful
+        /// @dev Checks allowance if caller is not the owner. Emits Transfer and Burn events.
+        /// @security Checks sufficient allowance and balance. Only allowed if not paused and burnable.
         fn burn_from(ref self: ContractState, from: ContractAddress, amount: u256) -> bool {
             let caller = get_caller_address();
             
@@ -358,6 +438,11 @@ mod ERC20Token {
             true
         }
 
+        /// Increases the allowance granted to spender by the caller
+        /// @param spender The address to increase allowance for
+        /// @param added_value The amount to add to the allowance
+        /// @return true if successful
+        /// @dev Emits Approval event. Prevents overflow.
         fn increase_allowance(ref self: ContractState, spender: ContractAddress, added_value: u256) -> bool {
             let owner = get_caller_address();
             let current_allowance = self.allowances.read((owner, spender));
@@ -365,6 +450,11 @@ mod ERC20Token {
             true
         }
 
+        /// Decreases the allowance granted to spender by the caller
+        /// @param spender The address to decrease allowance for
+        /// @param subtracted_value The amount to subtract from the allowance
+        /// @return true if successful
+        /// @dev Emits Approval event. Prevents underflow.
         fn decrease_allowance(ref self: ContractState, spender: ContractAddress, subtracted_value: u256) -> bool {
             let owner = get_caller_address();
             let current_allowance = self.allowances.read((owner, spender));
@@ -373,7 +463,11 @@ mod ERC20Token {
             true
         }
 
-        // Admin functions
+        /// Transfers contract ownership to a new address (only owner)
+        /// @param new_owner The address to transfer ownership to
+        /// @return true if successful
+        /// @dev Emits OwnershipTransferred event. Fails if new_owner is zero address.
+        /// @security Only current owner can call. Ensure new_owner is trusted.
         fn transfer_ownership(ref self: ContractState, new_owner: ContractAddress) -> bool {
             self._assert_only_owner();
             assert(!new_owner.is_zero(), ERROR_ZERO_ADDRESS);
@@ -389,6 +483,11 @@ mod ERC20Token {
             true
         }
 
+        /// Adds a new minter (only owner)
+        /// @param minter The address to grant minter role
+        /// @return true if successful
+        /// @dev Emits MinterAdded event. Fails if minter is zero address.
+        /// @security Only owner can add minters. Minters can mint new tokens.
         fn add_minter(ref self: ContractState, minter: ContractAddress) -> bool {
             self._assert_only_owner();
             assert(!minter.is_zero(), ERROR_ZERO_ADDRESS);
@@ -400,6 +499,11 @@ mod ERC20Token {
             true
         }
 
+        /// Removes a minter (only owner)
+        /// @param minter The address to revoke minter role
+        /// @return true if successful
+        /// @dev Emits MinterRemoved event.
+        /// @security Only owner can remove minters.
         fn remove_minter(ref self: ContractState, minter: ContractAddress) -> bool {
             self._assert_only_owner();
             
@@ -412,8 +516,8 @@ mod ERC20Token {
 
         /// Pauses all token transfers (only callable by owner)
         /// @return true if pausing was successful
-        /// Requires: caller must be owner, contract not already paused
-        /// Emits Paused event
+        /// @dev Emits Paused event. Fails if already paused.
+        /// @security Only owner can pause. No transfers, minting, or burning allowed while paused.
         fn pause(ref self: ContractState) -> bool {
             self._assert_only_owner();
             assert(!self.paused.read(), 'ERC20: already paused');
@@ -425,6 +529,10 @@ mod ERC20Token {
             true
         }
 
+        /// Unpauses all token transfers (only callable by owner)
+        /// @return true if unpausing was successful
+        /// @dev Emits Unpaused event. Fails if not paused.
+        /// @security Only owner can unpause.
         fn unpause(ref self: ContractState) -> bool {
             self._assert_only_owner();
             assert(self.paused.read(), 'ERC20: not paused');
@@ -466,6 +574,9 @@ mod ERC20Token {
     #[generate_trait]
     impl InternalImpl of InternalTrait {
         fn _transfer(ref self: ContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256) {
+            // Internal transfer logic
+            // Checks: contract not paused, sender/recipient not zero, sufficient balance
+            // Updates balances and emits Transfer event
             self._assert_not_paused();
             assert(!sender.is_zero(), ERROR_INVALID_SENDER);
             assert(!recipient.is_zero(), ERROR_INVALID_RECIPIENT);
@@ -488,6 +599,9 @@ mod ERC20Token {
         }
 
         fn _approve(ref self: ContractState, owner: ContractAddress, spender: ContractAddress, amount: u256) {
+            // Internal approve logic
+            // Checks: owner/spender not zero
+            // Updates allowance and emits Approval event
             assert(!owner.is_zero(), ERROR_INVALID_SENDER);
             assert(!spender.is_zero(), ERROR_INVALID_SPENDER);
             
@@ -501,6 +615,9 @@ mod ERC20Token {
         }
 
         fn _burn(ref self: ContractState, from: ContractAddress, amount: u256) {
+            // Internal burn logic
+            // Checks: contract not paused, burnable, from not zero, sufficient balance
+            // Updates balances, total supply, and emits Transfer and Burn events
             self._assert_not_paused();
             assert(self.burnable.read(), ERROR_NOT_BURNABLE);
             assert(!from.is_zero(), ERROR_INVALID_SENDER);
@@ -529,17 +646,20 @@ mod ERC20Token {
         }
 
         fn _assert_only_owner(self: @ContractState) {
+            // Asserts that the caller is the contract owner
             let caller = get_caller_address();
             let owner = self.owner.read();
             assert(caller == owner, ERROR_UNAUTHORIZED);
         }
 
         fn _assert_only_minter(self: @ContractState) {
+            // Asserts that the caller is a registered minter
             let caller = get_caller_address();
             assert(self.minters.read(caller), ERROR_UNAUTHORIZED);
         }
 
         fn _assert_not_paused(self: @ContractState) {
+            // Asserts that the contract is not paused
             assert(!self.paused.read(), ERROR_PAUSED);
         }
     }
@@ -597,3 +717,35 @@ trait IERC20Extended<TContractState> {
     fn is_mintable(self: @TContractState) -> bool;
     fn is_burnable(self: @TContractState) -> bool;
 }
+
+// -----------------------------------------------------------------------------
+// Example Usage: ERC20Token
+// -----------------------------------------------------------------------------
+//
+// // Deploying the contract (pseudo-code):
+// let token = ERC20Token.deploy(
+//     name='StarkPulse',
+//     symbol='SPT',
+//     decimals=18,
+//     initial_supply=1000000,
+//     max_supply=10000000,
+//     owner=OWNER_ADDRESS,
+//     mintable=true,
+//     burnable=true
+// );
+//
+// // Transferring tokens:
+// token.transfer(RECIPIENT_ADDRESS, 100);
+//
+// // Minting tokens (as minter):
+// token.mint(USER_ADDRESS, 500);
+//
+// // Burning tokens:
+// token.burn(50);
+//
+// // Pausing/unpausing (as owner):
+// token.pause();
+// token.unpause();
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------

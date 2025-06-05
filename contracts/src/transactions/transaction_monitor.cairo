@@ -1,3 +1,38 @@
+// -----------------------------------------------------------------------------
+// StarkPulse TransactionMonitor Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract monitors and records user transactions for the StarkPulse ecosystem, supporting notifications and analytics.
+//
+// Features:
+// - Tracks all user transactions with status and type
+// - User-configurable notification preferences
+// - Admin and access control for sensitive actions
+// - Integration with analytics and portfolio modules
+//
+// Security Considerations:
+// - Only admin or authorized roles can modify notification settings or access sensitive data
+// - All critical functions validate caller permissions and input values
+// - Zero address checks prevent accidental data loss
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let monitor = TransactionMonitor.deploy(admin=ADMIN_ADDRESS);
+//
+// // Record a new transaction:
+// monitor.record_transaction(USER_ADDRESS, TYPE_DEPOSIT, AMOUNT);
+//
+// // Update transaction status:
+// monitor.update_transaction_status(TX_ID, STATUS_COMPLETED);
+//
+// // Set notification preference:
+// monitor.set_notification_preference(USER_ADDRESS, NOTIFY_DEPOSITS, true);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 #[starknet::contract]
 mod TransactionMonitor {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
@@ -35,18 +70,17 @@ mod TransactionMonitor {
 
     #[storage]
     struct Storage {
-        // Transaction storage
+        // transactions: Mapping transaction ID → Transaction struct (all transaction details)
         transactions: Map<felt252, Transaction>,
+        // user_transactions: Mapping user address → list of transaction IDs
         user_transactions: Map<ContractAddress, Array<felt252>>,
+        // transaction_count: Global counter for all transactions
         transaction_count: u64,
-        
-        // Notification preferences
+        // user_notification_preferences: Mapping (user, notification_type) → enabled/disabled
         user_notification_preferences: Map<(ContractAddress, felt252), bool>,
-        
-        // Access control
+        // access_control: Access control module for admin/roles
         access_control: IAccessControl,
-        
-        // Admin address
+        // admin: Admin address with privileged permissions
         admin: ContractAddress,
     }
 
@@ -83,6 +117,10 @@ mod TransactionMonitor {
     }
 
     #[constructor]
+    /// Contract constructor
+    /// @param admin_address The address with admin rights (can manage transactions and notifications)
+    /// @dev Sets up the contract for transaction monitoring. Only admin can perform privileged actions.
+    /// @security Ensure admin_address is a trusted address.
     fn constructor(ref self: ContractState, admin_address: ContractAddress) {
         // Initialize contract
         self.admin.write(admin_address);
@@ -98,6 +136,14 @@ mod TransactionMonitor {
 
     #[external(v0)]
     impl TransactionMonitorImpl of ITransactionMonitor<ContractState> {
+        /// Records a new transaction for a user
+        /// @param tx_hash The unique hash of the transaction
+        /// @param tx_type The type of transaction (e.g., DEPOSIT, WITHDRAWAL)
+        /// @param amount The amount involved in the transaction
+        /// @param description Optional description or metadata
+        /// @return true if the transaction was recorded successfully
+        /// @dev Emits TransactionRecorded event. Updates user transaction list.
+        /// @security Only valid transaction types allowed. Admin can restrict further in future.
         fn record_transaction(
             ref self: ContractState, 
             tx_hash: felt252, 

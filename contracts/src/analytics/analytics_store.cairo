@@ -1,10 +1,46 @@
+// -----------------------------------------------------------------------------
+// StarkPulse AnalyticsStore Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract tracks user interactions and analytics events for the StarkPulse ecosystem.
+//
+// Features:
+// - Tracks per-user action counts on-chain
+// - Provides view functions for analytics dashboards
+// - Designed for integration with other contracts (e.g., PortfolioTracker)
+//
+// Security Considerations:
+// - Only whitelisted contracts should be allowed to call track_interaction in production
+// - All critical functions validate input values
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let analytics = AnalyticsStore.deploy();
+//
+// // Track a user action (from another contract):
+// analytics.track_interaction(USER_ADDRESS, ACTION_ID);
+//
+// // Query user action count:
+// analytics.get_user_action_count(USER_ADDRESS, ACTION_ID);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 %lang starknet
 
 @storage_var
+// interaction_count: Mapping (user, action_id) → count of actions performed
 func interaction_count(user: ContractAddress, action_id: felt) -> (count: felt):
 end
 
 @external
+/// Tracks a user interaction for analytics purposes
+/// @param user The address of the user performing the action
+/// @param action_id The unique identifier for the action/event
+/// @dev Increments the on-chain counter for (user, action_id)
+/// @security In production, restrict access to trusted contracts only
 func track_interaction{syscall_ptr: felt*, range_check_ptr}(
     user: ContractAddress,
     action_id: felt
@@ -16,6 +52,10 @@ func track_interaction{syscall_ptr: felt*, range_check_ptr}(
 end
 
 @view
+/// Returns the count of a specific action performed by a user
+/// @param user The address of the user
+/// @param action_id The unique identifier for the action/event
+/// @return count The number of times the user performed the action
 func get_user_action_count{syscall_ptr: felt*, range_check_ptr}(
     user: ContractAddress,
     action_id: felt
