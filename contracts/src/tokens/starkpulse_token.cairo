@@ -203,3 +203,30 @@ mod StarkPulseToken {
         }
     }
 }
+
+
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_ERC20);
+            interfaces.append(INTERFACE_ERC20_EXT);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ERC20);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_ERC20 || interface_id == INTERFACE_ERC20_EXT {
+                (1,)
+            } else {
+                (0,)
+            }
+        }
+    }
+}
