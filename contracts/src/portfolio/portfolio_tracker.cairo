@@ -1,3 +1,35 @@
+// -----------------------------------------------------------------------------
+// StarkPulse PortfolioTracker Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract tracks user portfolios, asset balances, and integrates with analytics for the StarkPulse ecosystem.
+//
+// Features:
+// - Tracks balances of multiple assets per user
+// - Stores asset lists and last update timestamps
+// - Admin-controlled asset management
+// - Analytics integration for on-chain activity tracking
+//
+// Security Considerations:
+// - Only admin can perform privileged actions (e.g., asset management)
+// - All critical functions validate caller permissions and input values
+// - Zero address checks prevent accidental asset loss
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let tracker = PortfolioTracker.deploy(admin=ADMIN_ADDRESS);
+//
+// // Add/update asset for user:
+// tracker.update_asset(USER_ADDRESS, ASSET_ADDRESS, AMOUNT);
+//
+// // Get user asset list:
+// tracker.get_user_assets(USER_ADDRESS);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 %lang starknet
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,11 +67,11 @@ struct Asset {
 
 #[storage]
 struct Storage {
-    // Mapping (user, asset_address) → Asset
+    // user_assets: Mapping (user, asset_address) → Asset struct (tracks amount and last update)
     user_assets: LegacyMap::<(ContractAddress, ContractAddress), Asset>,
-    // For each user, list of held asset addresses
+    // user_asset_list: Mapping user → list of held asset addresses
     user_asset_list: LegacyMap::<ContractAddress, Array<ContractAddress>>,
-    // Admin address
+    // admin: Admin address with privileged permissions
     admin: ContractAddress,
 }
 
@@ -66,6 +98,10 @@ mod PortfolioTracker {
     // Constructor
     // ----------------------------
     #[constructor]
+    /// Contract constructor
+    /// @param admin_address The address with admin rights (can manage assets)
+    /// @dev Sets up the contract for portfolio tracking. Only admin can perform privileged actions.
+    /// @security Ensure admin_address is a trusted address.
     fn constructor(ref self: ContractState, admin_address: ContractAddress) {
         // Only the deployer can set
         self.admin.write(admin_address);
@@ -76,7 +112,12 @@ mod PortfolioTracker {
     // ----------------------------
     #[external(v0)]
     impl PortfolioTrackerImpl of IPortfolioTracker<ContractState> {
-        /// Add `amount` of `asset_address` to caller's portfolio.
+        /// Adds an asset to the caller's portfolio
+        /// @param asset_address The address of the asset to add
+        /// @param amount The amount of the asset to add
+        /// @return true if the asset was added or updated successfully
+        /// @dev Updates the asset list and last updated timestamp. Emits no event.
+        /// @security Only valid callers and asset addresses allowed. Admin can restrict further in future.
         fn add_asset(
             ref self: ContractState,
             asset_address: ContractAddress,

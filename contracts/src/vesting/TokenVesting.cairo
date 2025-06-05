@@ -1,3 +1,49 @@
+// -----------------------------------------------------------------------------
+// StarkPulse TokenVesting Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract implements token vesting for StarkPulse, allowing tokens to be released to beneficiaries over time according to customizable schedules.
+//
+// Features:
+// - Multiple vesting schedules per beneficiary
+// - Admin-controlled schedule creation, revocation, and emergency pause
+// - ERC20 token integration for automated token release
+// - Revocable and non-revocable vesting options
+// - On-chain tracking of released and remaining tokens
+//
+// Security Considerations:
+// - Only the admin can create, revoke, or pause schedules
+// - Pausing disables all token releases and schedule changes
+// - All critical functions validate caller permissions and input values
+// - Revoked schedules cannot be released further
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let vesting = TokenVesting.deploy(
+//     admin=ADMIN_ADDRESS,
+//     token=ERC20_TOKEN_ADDRESS
+// );
+//
+// // Creating a vesting schedule (as admin):
+// vesting.create_vesting_schedule(
+//     beneficiary=USER_ADDRESS,
+//     start=START_TIMESTAMP,
+//     duration=DURATION_SECONDS,
+//     amount=AMOUNT,
+//     revocable=true
+// );
+//
+// // Beneficiary releases vested tokens:
+// vesting.release_tokens(SCHEDULE_ID);
+//
+// // Admin revokes a schedule:
+// vesting.revoke_vesting_schedule(SCHEDULE_ID);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 // StarkPulse TokenVesting Contract
 // Implements token vesting functionality with admin controls and schedule management
 
@@ -22,20 +68,21 @@ mod TokenVesting {
     
     #[storage]
     struct Storage {
-        // Contract administrator with special permissions
+        // admin: Contract administrator with special permissions (can create/revoke schedules, pause contract)
         admin: ContractAddress,
-        // ERC20 token to distribute
+        // token: ERC20 token address to be distributed via vesting
         token: ContractAddress,
-        // Emergency control
+        // paused: Emergency pause flag (true disables all actions)
         paused: bool,
-        // Vesting schedule tracking
+        // schedule_count: Global counter for vesting schedules
         schedule_count: u64,
-        // Mappings for vesting data
+        // vesting_schedules: Mapping (beneficiary, schedule_id) → VestingSchedule struct
         vesting_schedules: Map<(ContractAddress, u64), TokenVestingTypes::VestingSchedule>,
+        // beneficiary_schedule_count: Mapping beneficiary → number of schedules
         beneficiary_schedule_count: Map<ContractAddress, u64>,
-        // Total tokens in vesting per beneficiary
+        // total_vesting_per_beneficiary: Mapping beneficiary → total tokens in vesting
         total_vesting_per_beneficiary: Map<ContractAddress, u256>,
-        // Revocation tracking
+        // revoked_schedules: Mapping (beneficiary, schedule_id) → true if revoked
         revoked_schedules: Map<(ContractAddress, u64), bool>,
     }
 
@@ -106,6 +153,11 @@ mod TokenVesting {
     const INTERFACE_VESTING: felt252 = 'ITokenVestingContract';
     const DEPENDENCY_ERC20: felt252 = 'IERC20';
 
+    /// Contract constructor
+    /// @param admin The address with admin rights (can create/revoke schedules, pause contract)
+    /// @param token The ERC20 token address to be distributed via vesting
+    /// @dev Sets up the contract for vesting management. Only admin can perform privileged actions.
+    /// @security Ensure admin is a trusted address. Pausing disables all actions.
     #[constructor]
     fn constructor(ref self: ContractState, admin_address: ContractAddress, token_address: ContractAddress) {
         assert(!admin_address.is_zero(), ERROR_INVALID_BENEFICIARY);
@@ -119,6 +171,15 @@ mod TokenVesting {
 
     #[abi(embed_v0)]
     impl TokenVestingImpl of ITokenVestingContract<ContractState> {
+        /// Creates a new vesting schedule for a beneficiary (admin only)
+        /// @param beneficiary The address to receive vested tokens
+        /// @param amount The total amount of tokens to vest
+        /// @param start_time The timestamp when vesting starts
+        /// @param duration The total duration of the vesting period (seconds)
+        /// @param cliff_duration The initial period before any tokens are released (seconds)
+        /// @return schedule_id The unique ID of the created schedule
+        /// @dev Transfers tokens from admin to contract. Emits VestingScheduleCreated event.
+        /// @security Only admin can call. Validates all input parameters. Paused contract blocks creation.
         fn create_vesting_schedule(
             ref self: ContractState,
             beneficiary: ContractAddress,
@@ -190,6 +251,10 @@ mod TokenVesting {
             schedule_id
         }
 
+        /// Releases vested tokens for the caller's schedule
+        /// @param schedule_id The ID of the vesting schedule
+        /// @dev Transfers available tokens to beneficiary. Emits TokensReleased event.
+        /// @security Only beneficiary can call. Paused contract blocks release. Revoked schedules cannot release.
         fn release_tokens(ref self: ContractState, schedule_id: u64) {
             self.assert_not_paused();
             
@@ -227,7 +292,12 @@ mod TokenVesting {
             });
         }
         
-        fn revoke_schedule(ref self: ContractState, beneficiary: ContractAddress, schedule_id: u64) {
+        /// Revokes a vesting schedule (admin only)
+        /// @param beneficiary The address whose schedule is being revoked
+        /// @param schedule_id The ID of the schedule to revoke
+        /// @dev Emits VestingScheduleRevoked event. Revoked schedules cannot release further tokens.
+        /// @security Only admin can call. Paused contract blocks revocation.
+        fn revoke_vesting_schedule(ref self: ContractState, beneficiary: ContractAddress, schedule_id: u64) {
             self.assert_only_admin();
             
             // Verify that the schedule is valid and not revoked
@@ -260,18 +330,28 @@ mod TokenVesting {
             });
         }
         
+        /// Pauses all contract actions (admin only)
+        /// @dev Emits EmergencyPause event. No vesting actions allowed while paused.
+        /// @security Only admin can call.
         fn emergency_pause(ref self: ContractState) {
             self.assert_only_admin();
             self.paused.write(true);
             self.emit(EmergencyPause {});
         }
         
+        /// Unpauses contract actions (admin only)
+        /// @dev Emits EmergencyUnpause event. Restores normal operation.
+        /// @security Only admin can call.
         fn emergency_unpause(ref self: ContractState) {
             self.assert_only_admin();
             self.paused.write(false);
             self.emit(EmergencyUnpause {});
         }
         
+        /// Changes the contract admin
+        /// @param new_admin The address to set as new admin
+        /// @dev Emits AdminChanged event. Only callable by current admin.
+        /// @security Only current admin can call. Ensure new_admin is trusted.
         fn change_admin(ref self: ContractState, new_admin: ContractAddress) {
             self.assert_only_admin();
             assert(!new_admin.is_zero(), ERROR_INVALID_BENEFICIARY);
