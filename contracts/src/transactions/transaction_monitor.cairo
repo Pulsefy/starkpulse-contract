@@ -43,6 +43,15 @@ mod TransactionMonitor {
     use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
     use array::ArrayTrait;
 
+    use openzeppelin::security::PausableComponent;
+
+    component!(path: PausableComponent, storage: pausable, event: PausableEvent);
+
+    // Pausable
+    #[abi(embed_v0)]
+    impl PausableImpl = PausableComponent::PausableImpl<ContractState>;
+    impl PausableInternalImpl = PausableComponent::InternalImpl<ContractState>;
+
     // Metadata constants
     const CONTRACT_VERSION: felt252 = '1.0.0';
     const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#transaction-monitor';
@@ -82,6 +91,8 @@ mod TransactionMonitor {
         access_control: IAccessControl,
         // admin: Admin address with privileged permissions
         admin: ContractAddress,
+        #[substorage(v0)]
+        pausable: PausableComponent::Storage,
     }
 
     #[event]
@@ -90,6 +101,8 @@ mod TransactionMonitor {
         TransactionRecorded: TransactionRecorded,
         TransactionStatusUpdated: TransactionStatusUpdated,
         NotificationPreferencesSet: NotificationPreferencesSet,
+        #[flat]
+        PausableEvent: PausableComponent::Event,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -364,6 +377,16 @@ mod TransactionMonitor {
             assert(transaction.tx_hash != 0, "Transaction does not exist");
             
             transaction
+        }
+        // Pause the contract
+        fn pause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.pause();
+        }
+        // Unpause the contract
+        fn unpause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.unpause();
         }
     }
     

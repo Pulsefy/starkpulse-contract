@@ -43,6 +43,10 @@ trait ITransactionMonitor<TContractState> {
         self: @TContractState, 
         tx_hash: felt252
     ) -> Transaction;
+
+    // Contract Pause/Resume
+    fn pause(ref self: TContractState);
+    fn unpause(ref self: TContractState);
 }
 
 #[derive(Drop, Serde, starknet::Store)]

@@ -39,6 +39,10 @@ trait IUserAuth<TContractState> {
     fn set_recovery_address(ref self: TContractState, recovery_address: starknet::ContractAddress) -> bool;
     
     fn recover_account(ref self: TContractState, user_address: starknet::ContractAddress) -> bool;
+
+    // Contract Pause/Resume
+    fn pause(ref self: TContractState);
+    fn unpause(ref self: TContractState);
     
     // View Functions
     fn get_user_profile(self: @TContractState, user_address: starknet::ContractAddress) -> UserProfile;
@@ -50,6 +54,7 @@ trait IUserAuth<TContractState> {
     fn get_nonce(self: @TContractState, user_address: starknet::ContractAddress) -> u64;
     
     fn is_admin(self: @TContractState, user_address: starknet::ContractAddress) -> bool;
+    
 }
 
 #[derive(Drop, Serde, starknet::Store)]

@@ -3,6 +3,15 @@ mod ContractInteraction {
     use starknet::{ContractAddress, get_caller_address};
     use starknet::storage::Map;
     use zeroable::Zeroable;
+
+    use openzeppelin::security::PausableComponent;
+
+    component!(path: PausableComponent, storage: pausable, event: PausableEvent);
+
+    // Pausable
+    #[abi(embed_v0)]
+    impl PausableImpl = PausableComponent::PausableImpl<ContractState>;
+    impl PausableInternalImpl = PausableComponent::InternalImpl<ContractState>;
     
     #[storage]
     struct Storage {
@@ -11,7 +20,9 @@ mod ContractInteraction {
         // Caller approvals
         approved_callers: Map<(felt252, ContractAddress), bool>,
         // Admin address
-        admin: ContractAddress
+        admin: ContractAddress,
+        #[substorage(v0)]
+        pausable: PausableComponent::Storage,
     }
     
     #[event]
@@ -20,7 +31,9 @@ mod ContractInteraction {
         ContractRegistered: ContractRegistered,
         CallerApproved: CallerApproved,
         CallerRevoked: CallerRevoked,
-        ContractCalled: ContractCalled
+        ContractCalled: ContractCalled,
+        #[flat]
+        PausableEvent: PausableComponent::Event,
     }
     
     #[derive(Drop, starknet::Event)]
@@ -161,6 +174,16 @@ mod ContractInteraction {
             });
             
             result
+        }
+        // Pause the contract
+        fn pause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.pause();
+        }
+        // Unpause the contract
+        fn unpause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.unpause();
         }
     }
     
