@@ -238,6 +238,89 @@ mod PortfolioTracker {
 
             total
         }
+
+        /// Batch add assets to the caller's portfolio
+        fn batch_add_assets(
+            ref self: ContractState,
+            asset_addresses: Array<ContractAddress>,
+            amounts: Array<u256>
+        ) -> bool {
+            assert(asset_addresses.len() == amounts.len(), 'Mismatched array lengths');
+            let caller = get_caller_address();
+            let ts = get_block_timestamp();
+            let mut i = 0;
+            while i < asset_addresses.len() {
+                let asset_address = asset_addresses.at(i);
+                let amount = amounts.at(i);
+                if amount > 0 {
+                    let existing = self.user_assets.read((caller, asset_address));
+                    if existing.address.is_zero() {
+                        let a = Asset {
+                            address: asset_address,
+                            amount,
+                            last_updated: ts,
+                        };
+                        self.user_assets.write((caller, asset_address), a);
+                        let mut list = self.user_asset_list.read(caller);
+                        list.append(asset_address);
+                        self.user_asset_list.write(caller, list);
+                    } else {
+                        let updated = Asset {
+                            address: asset_address,
+                            amount: existing.amount + amount,
+                            last_updated: ts,
+                        };
+                        self.user_assets.write((caller, asset_address), updated);
+                    }
+                }
+                i += 1;
+            }
+            // Analytics: action_id = 10 for batch add
+            let analytics = IAnalytics::at(ANALYTICS_ADDRESS);
+            analytics.track_interaction(caller, 10).invoke();
+            true
+        }
+
+        /// Batch remove assets from the caller's portfolio
+        fn batch_remove_assets(
+            ref self: ContractState,
+            asset_addresses: Array<ContractAddress>,
+            amounts: Array<u256>
+        ) -> bool {
+            assert(asset_addresses.len() == amounts.len(), 'Mismatched array lengths');
+            let caller = get_caller_address();
+            let ts = get_block_timestamp();
+            let mut i = 0;
+            while i < asset_addresses.len() {
+                let asset_address = asset_addresses.at(i);
+                let amount = amounts.at(i);
+                let existing = self.user_assets.read((caller, asset_address));
+                assert(!existing.address.is_zero(), 'Asset not found');
+                assert(existing.amount >= amount, 'Insufficient balance');
+                let new_amount = existing.amount - amount;
+                if new_amount == 0 {
+                    let zeroed = Asset {
+                        address: ContractAddressConst::<0>(),
+                        amount: 0,
+                        last_updated: ts,
+                    };
+                    self.user_assets.write((caller, asset_address), zeroed);
+                    // NOTE: not removing from list for gas efficiency
+                } else {
+                    let updated = Asset {
+                        address: asset_address,
+                        amount: new_amount,
+                        last_updated: ts,
+                    };
+                    self.user_assets.write((caller, asset_address), updated);
+                }
+                i += 1;
+            }
+            // Analytics: action_id = 11 for batch remove
+            let analytics = IAnalytics::at(ANALYTICS_ADDRESS);
+            analytics.track_interaction(caller, 11).invoke();
+            true
+        }
     }
 
     // ----------------------------
