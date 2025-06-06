@@ -33,6 +33,9 @@ trait IContractInteraction<TContractState> {
         function_name: felt252,
         calldata: Array<felt252>
     ) -> Array<felt252>;
+    // Contract Pause/Resume
+    fn pause(ref self: TContractState);
+    fn unpause(ref self: TContractState);
 }
 
 #[derive(Drop, Serde, starknet::Store)]

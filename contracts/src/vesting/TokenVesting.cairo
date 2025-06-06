@@ -65,6 +65,16 @@ mod TokenVesting {
     // Local interfaces
     use crate::interfaces::i_token_vesting::{TokenVestingTypes, ITokenVestingContract};
     use crate::interfaces::i_erc20::{IERC20, IERC20Dispatcher, IERC20DispatcherTrait};
+
+    use openzeppelin::security::PausableComponent;
+
+    component!(path: PausableComponent, storage: pausable, event: PausableEvent);
+
+    // Pausable
+    #[abi(embed_v0)]
+    impl PausableImpl = PausableComponent::PausableImpl<ContractState>;
+    impl PausableInternalImpl = PausableComponent::InternalImpl<ContractState>;
+
     
     #[storage]
     struct Storage {
@@ -84,6 +94,7 @@ mod TokenVesting {
         total_vesting_per_beneficiary: Map<ContractAddress, u256>,
         // revoked_schedules: Mapping (beneficiary, schedule_id) → true if revoked
         revoked_schedules: Map<(ContractAddress, u64), bool>,
+        
     }
 
     #[event]

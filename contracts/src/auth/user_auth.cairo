@@ -8,6 +8,16 @@ mod UserAuth {
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
     use contracts::src::interfaces::i_user_auth::{IUserAuth, UserProfile, Session, UserAuthTypes};
 
+    use openzeppelin::security::PausableComponent;
+
+    component!(path: PausableComponent, storage: pausable, event: PausableEvent);
+
+    // Pausable
+    #[abi(embed_v0)]
+    impl PausableImpl = PausableComponent::PausableImpl<ContractState>;
+    impl PausableInternalImpl = PausableComponent::InternalImpl<ContractState>;
+    
+
     // Metadata constants
     const CONTRACT_VERSION: felt252 = '1.0.0';
     const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#user-auth';
@@ -49,6 +59,9 @@ mod UserAuth {
         
         // Emergency recovery addresses
         recovery_addresses: Map<ContractAddress, ContractAddress>,
+
+        #[substorage(v0)]
+        pausable: PausableComponent::Storage
     }
 
     #[event]
@@ -64,6 +77,8 @@ mod UserAuth {
         AdminRightsTransferred: AdminRightsTransferred,
         EmergencyRecoverySet: EmergencyRecoverySet,
         EmergencyRecoveryUsed: EmergencyRecoveryUsed,
+        #[flat]
+        PausableEvent: PausableComponent::Event,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -153,6 +168,7 @@ mod UserAuth {
             display_name: felt252,
             email_hash: felt252
         ) -> bool {
+            self.pausable.assert_not_paused();
             let caller = get_caller_address();
             
             // Validate inputs
@@ -513,7 +529,18 @@ mod UserAuth {
         fn is_admin(self: @ContractState, user_address: ContractAddress) -> bool {
             user_address == self.admin.read()
         }
+        // Pause the contract
+        fn pause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.pause();
+        }
+        // Unpause the contract
+        fn unpause(ref self: ContractState) {
+            self.assert_only_admin();
+            self.pausable.unpause();
+        }
     }
+
     
     // Internal functions
     #[generate_trait]
@@ -539,6 +566,10 @@ mod UserAuth {
                     });
                 }
             }
+        }
+        fn assert_only_admin(self: @ContractState) {
+            let caller = get_caller_address();
+            assert(caller == self.admin.read(), 'Not authorized');
         }
     }
     
