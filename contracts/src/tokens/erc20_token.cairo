@@ -63,51 +63,24 @@
 
 #[starknet::contract]
 mod ERC20Token {
-    use starknet::{ContractAddress, get_caller_address, get_contract_address};
-    use starknet::storage::Map;
-    use zeroable::Zeroable;
-    use crate::interfaces::i_erc20::IERC20;
-    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
-    use array::ArrayTrait;
-
-    // Metadata constants
-    const CONTRACT_VERSION: felt252 = '1.0.0';
-    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#erc20-token';
-    const INTERFACE_ERC20: felt252 = 'IERC20';
-    const INTERFACE_ERC20_EXT: felt252 = 'IERC20Extended';
-    // Add more interface IDs as needed
-    const DEPENDENCY_NONE: felt252 = 'None';
+    use starknet::ContractAddress;
+    use starknet::get_caller_address;
+    use starkpulse::utils::error_handling::{ErrorHandling, ErrorHandlingImpl, error_codes};
 
     #[storage]
     struct Storage {
-        // Token metadata
-        // name: The name of the token (e.g., 'StarkPulse')
-        // symbol: The token symbol (e.g., 'SPT')
-        // decimals: Number of decimals the token uses (e.g., 18)
-        // total_supply: Current total supply of tokens
-        name: felt252,
-        symbol: felt252,
-        decimals: u8,
-        total_supply: u256,
-        
-        // balances: Mapping from address to token balance
-        // allowances: Mapping from (owner, spender) to allowance amount
-        balances: Map<ContractAddress, u256>,
-        allowances: Map<(ContractAddress, ContractAddress), u256>,
-        
-        // owner: The contract owner (has admin privileges)
-        // minters: Mapping from address to minter status (true/false)
-        // paused: If true, all token transfers are paused
-        owner: ContractAddress,
-        minters: Map<ContractAddress, bool>,
-        paused: bool,
-        
-        // max_supply: Maximum allowed total supply (0 = unlimited)
-        // mintable: If true, tokens can be minted
-        // burnable: If true, tokens can be burned
-        max_supply: u256,
-        mintable: bool,
-        burnable: bool,
+        _name: felt252,
+        _symbol: felt252,
+        _decimals: u8,
+        _total_supply: u256,
+        _max_supply: u256,
+        _balances: LegacyMap::<ContractAddress, u256>,
+        _allowances: LegacyMap::<(ContractAddress, ContractAddress), u256>,
+        _owner: ContractAddress,
+        _minters: LegacyMap::<ContractAddress, bool>,
+        _paused: bool,
+        _mintable: bool,
+        _burnable: bool
     }
 
     #[event]
@@ -296,8 +269,36 @@ mod ERC20Token {
         /// @dev Emits a Transfer event. Fails if contract is paused, sender has insufficient balance, or recipient is zero address.
         /// @security Only unpaused contract allows transfers. Always checks for sufficient balance and valid recipient.
         fn transfer(ref self: ContractState, recipient: ContractAddress, amount: u256) -> bool {
-            let sender = get_caller_address();
-            self._transfer(sender, recipient, amount);
+            // Check if contract is paused
+            if self._paused.read() {
+                self.emit_error(error_codes::CONTRACT_PAUSED, 'Contract is paused', 0);
+                return false;
+            }
+
+            // Check for zero address
+            if recipient.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Cannot transfer to zero address', 0);
+                return false;
+            }
+
+            let caller = get_caller_address();
+            let caller_balance = self._balances.read(caller);
+
+            // Check sufficient balance
+            if caller_balance < amount {
+                self.emit_error(
+                    error_codes::INSUFFICIENT_BALANCE,
+                    'Insufficient balance for transfer',
+                    caller_balance.try_into().unwrap()
+                );
+                return false;
+            }
+
+            // Perform transfer
+            self._balances.write(caller, caller_balance - amount);
+            self._balances.write(recipient, self._balances.read(recipient) + amount);
+            
+            self.emit(Transfer { from: caller, to: recipient, value: amount });
             true
         }
 
@@ -336,8 +337,15 @@ mod ERC20Token {
         /// @dev Emits an Approval event. Overwrites previous allowance.
         /// @security Spender must not be zero address. Caller is always the owner of the tokens.
         fn approve(ref self: ContractState, spender: ContractAddress, amount: u256) -> bool {
+            if spender.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Cannot approve zero address', 0);
+                return false;
+            }
+
             let owner = get_caller_address();
-            self._approve(owner, spender, amount);
+            self._allowances.write((owner, spender), amount);
+            
+            self.emit(Approval { owner, spender, value: amount });
             true
         }
 
@@ -370,38 +378,32 @@ mod ERC20Token {
         /// @dev Emits Transfer and Mint events. Checks max supply if set.
         /// @security Only minters can call. Fails if paused, not mintable, or exceeds max supply.
         fn mint(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
-            self._assert_only_minter();
-            self._assert_not_paused();
-            assert(self.mintable.read(), ERROR_NOT_MINTABLE);
-            assert(!to.is_zero(), ERROR_INVALID_RECIPIENT);
-            assert(amount > 0, 'ERC20: amount must be positive');
-            
-            // Check max supply if set
-            let max_supply = self.max_supply.read();
-            if max_supply > 0 {
-                let new_total_supply = self.total_supply.read() + amount;
-                assert(new_total_supply <= max_supply, ERROR_EXCEEDS_MAX_SUPPLY);
+            if !self._mintable.read() {
+                self.emit_error(error_codes::INVALID_OPERATION, 'Minting is disabled', 0);
+                return false;
             }
+
+            let caller = get_caller_address();
+            if !self._minters.read(caller) {
+                self.emit_error(error_codes::UNAUTHORIZED_ACCESS, 'Caller is not a minter', 0);
+                return false;
+            }
+
+            if to.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Cannot mint to zero address', 0);
+                return false;
+            }
+
+            let new_supply = self._total_supply.read() + amount;
+            if new_supply > self._max_supply.read() {
+                self.emit_error(error_codes::OVERFLOW, 'Mint would exceed max supply', 0);
+                return false;
+            }
+
+            self._total_supply.write(new_supply);
+            self._balances.write(to, self._balances.read(to) + amount);
             
-            // Update balances and total supply
-            let current_balance = self.balances.read(to);
-            self.balances.write(to, current_balance + amount);
-            
-            let current_total_supply = self.total_supply.read();
-            self.total_supply.write(current_total_supply + amount);
-            
-            // Emit events
-            self.emit(Transfer {
-                from: ContractAddress::zero(),
-                to: to,
-                value: amount,
-            });
-            
-            self.emit(Mint {
-                to: to,
-                amount: amount,
-            });
-            
+            self.emit(Transfer { from: ContractAddress::from(0), to, value: amount });
             true
         }
 

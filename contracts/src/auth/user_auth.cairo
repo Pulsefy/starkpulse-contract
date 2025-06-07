@@ -7,6 +7,7 @@ mod UserAuth {
     use array::ArrayTrait;
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
     use contracts::src::interfaces::i_user_auth::{IUserAuth, UserProfile, Session, UserAuthTypes};
+    use starkpulse::utils::error_handling::{ErrorHandling, ErrorHandlingImpl, error_codes};
 
     // Metadata constants
     const CONTRACT_VERSION: felt252 = '1.0.0';
@@ -49,6 +50,11 @@ mod UserAuth {
         
         // Emergency recovery addresses
         recovery_addresses: Map<ContractAddress, ContractAddress>,
+        
+        // Error handling
+        _is_active: Map<ContractAddress, bool>,
+        _is_blocked: Map<ContractAddress, bool>,
+        _registration_time: Map<ContractAddress, u64>,
     }
 
     #[event]
@@ -512,6 +518,26 @@ mod UserAuth {
         // Check if user has admin role
         fn is_admin(self: @ContractState, user_address: ContractAddress) -> bool {
             user_address == self.admin.read()
+        }
+        
+        // Authenticate user
+        fn authenticate_user(ref self: ContractState, user: ContractAddress) -> bool {
+            if user.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid user address', 0);
+                return false;
+            }
+
+            if !self._is_active.read(user) {
+                self.emit_error(error_codes::STATE_INVALID, 'User account is not active', 0);
+                return false;
+            }
+
+            if self._is_blocked.read(user) {
+                self.emit_error(error_codes::UNAUTHORIZED_ACCESS, 'User account is blocked', 0);
+                return false;
+            }
+
+            true
         }
     }
     
