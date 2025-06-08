@@ -1,20 +1,22 @@
 // StarkPulse Contract - Library File
-// Exporta todos los módulos del proyecto
+// Exports all project modules
 
-// Módulos de interfaces
+// Interface modules
 mod interfaces {
     pub mod i_erc20;
     pub mod i_token_vesting;
     pub mod i_transaction_monitor;
     pub mod i_portfolio_tracker;
+    pub mod i_error_handling;
 }
 
-// Módulos de utilidades
+// Utility modules
 mod utils {
     pub mod access_control;
+    pub mod error_handling;
 }
 
-// Módulos principales
+// Main modules
 mod vesting {
     pub mod TokenVesting;
 }
@@ -23,4 +25,10 @@ mod vesting {
 #[cfg(test)]
 mod tests {
     pub mod test_token_vesting;
+    pub mod test_user_auth;
+    pub mod test_contract_interaction;
+    pub mod test_erc20_token;
+    pub mod test_starkpulse_token;
+    pub mod test_access_control;
+    pub mod test_event_emission;
 }

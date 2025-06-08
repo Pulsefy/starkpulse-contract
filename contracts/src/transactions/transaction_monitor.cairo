@@ -1,11 +1,53 @@
+// -----------------------------------------------------------------------------
+// StarkPulse TransactionMonitor Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract monitors and records user transactions for the StarkPulse ecosystem, supporting notifications and analytics.
+//
+// Features:
+// - Tracks all user transactions with status and type
+// - User-configurable notification preferences
+// - Admin and access control for sensitive actions
+// - Integration with analytics and portfolio modules
+//
+// Security Considerations:
+// - Only admin or authorized roles can modify notification settings or access sensitive data
+// - All critical functions validate caller permissions and input values
+// - Zero address checks prevent accidental data loss
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let monitor = TransactionMonitor.deploy(admin=ADMIN_ADDRESS);
+//
+// // Record a new transaction:
+// monitor.record_transaction(USER_ADDRESS, TYPE_DEPOSIT, AMOUNT);
+//
+// // Update transaction status:
+// monitor.update_transaction_status(TX_ID, STATUS_COMPLETED);
+//
+// // Set notification preference:
+// monitor.set_notification_preference(USER_ADDRESS, NOTIFY_DEPOSITS, true);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 #[starknet::contract]
 mod TransactionMonitor {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use starknet::storage::Map;
     use zeroable::Zeroable;
-    use array::ArrayTrait;
     use contracts::src::interfaces::i_transaction_monitor::{ITransactionMonitor, Transaction, TransactionMonitorTypes};
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+    use array::ArrayTrait;
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#transaction-monitor';
+    const INTERFACE_TX_MONITOR: felt252 = 'ITransactionMonitor';
+    const DEPENDENCY_ACCESS_CONTROL: felt252 = 'IAccessControl';
 
     // Constants for transaction status
     const STATUS_PENDING: felt252 = 'PENDING';
@@ -28,18 +70,17 @@ mod TransactionMonitor {
 
     #[storage]
     struct Storage {
-        // Transaction storage
+        // transactions: Mapping transaction ID → Transaction struct (all transaction details)
         transactions: Map<felt252, Transaction>,
+        // user_transactions: Mapping user address → list of transaction IDs
         user_transactions: Map<ContractAddress, Array<felt252>>,
+        // transaction_count: Global counter for all transactions
         transaction_count: u64,
-        
-        // Notification preferences
+        // user_notification_preferences: Mapping (user, notification_type) → enabled/disabled
         user_notification_preferences: Map<(ContractAddress, felt252), bool>,
-        
-        // Access control
+        // access_control: Access control module for admin/roles
         access_control: IAccessControl,
-        
-        // Admin address
+        // admin: Admin address with privileged permissions
         admin: ContractAddress,
     }
 
@@ -76,6 +117,10 @@ mod TransactionMonitor {
     }
 
     #[constructor]
+    /// Contract constructor
+    /// @param admin_address The address with admin rights (can manage transactions and notifications)
+    /// @dev Sets up the contract for transaction monitoring. Only admin can perform privileged actions.
+    /// @security Ensure admin_address is a trusted address.
     fn constructor(ref self: ContractState, admin_address: ContractAddress) {
         // Initialize contract
         self.admin.write(admin_address);
@@ -91,6 +136,14 @@ mod TransactionMonitor {
 
     #[external(v0)]
     impl TransactionMonitorImpl of ITransactionMonitor<ContractState> {
+        /// Records a new transaction for a user
+        /// @param tx_hash The unique hash of the transaction
+        /// @param tx_type The type of transaction (e.g., DEPOSIT, WITHDRAWAL)
+        /// @param amount The amount involved in the transaction
+        /// @param description Optional description or metadata
+        /// @return true if the transaction was recorded successfully
+        /// @dev Emits TransactionRecorded event. Updates user transaction list.
+        /// @security Only valid transaction types allowed. Admin can restrict further in future.
         fn record_transaction(
             ref self: ContractState, 
             tx_hash: felt252, 
@@ -311,6 +364,30 @@ mod TransactionMonitor {
             assert(transaction.tx_hash != 0, "Transaction does not exist");
             
             transaction
+        }
+    }
+    
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_TX_MONITOR);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ACCESS_CONTROL);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_TX_MONITOR {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
     

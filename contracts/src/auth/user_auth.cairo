@@ -3,9 +3,17 @@ mod UserAuth {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use starknet::storage::Map;
     use zeroable::Zeroable;
+    use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
     use array::ArrayTrait;
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
     use contracts::src::interfaces::i_user_auth::{IUserAuth, UserProfile, Session, UserAuthTypes};
+    use starkpulse::utils::error_handling::{ErrorHandling, ErrorHandlingImpl, error_codes};
+
+    // Metadata constants
+    const CONTRACT_VERSION: felt252 = '1.0.0';
+    const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#user-auth';
+    const INTERFACE_USER_AUTH: felt252 = 'IUserAuth';
+    const DEPENDENCY_ACCESS_CONTROL: felt252 = 'IAccessControl';
 
     // Constants for session status
     const SESSION_ACTIVE: felt252 = 'ACTIVE';
@@ -45,9 +53,15 @@ mod UserAuth {
         // Emergency recovery addresses
         recovery_addresses: Map<ContractAddress, ContractAddress>,
         
-        // MFA management
-        mfa_backup_codes: Map<ContractAddress, Array<felt252>>,
-    }
+    // MFA management
+    mfa_backup_codes: Map<ContractAddress, Array<felt252>>,
+
+    // Error handling
+    _is_active: Map<ContractAddress, bool>,
+    _is_blocked: Map<ContractAddress, bool>,
+    _registration_time: Map<ContractAddress, u64>,
+}
+
 
     #[event]
     #[derive(Drop, starknet::Event)]
@@ -648,6 +662,26 @@ mod UserAuth {
         fn is_admin(self: @ContractState, user_address: ContractAddress) -> bool {
             user_address == self.admin.read()
         }
+        
+        // Authenticate user
+        fn authenticate_user(ref self: ContractState, user: ContractAddress) -> bool {
+            if user.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid user address', 0);
+                return false;
+            }
+
+            if !self._is_active.read(user) {
+                self.emit_error(error_codes::STATE_INVALID, 'User account is not active', 0);
+                return false;
+            }
+
+            if self._is_blocked.read(user) {
+                self.emit_error(error_codes::UNAUTHORIZED_ACCESS, 'User account is blocked', 0);
+                return false;
+            }
+
+            true
+        }
     }
     
     // Internal functions
@@ -673,6 +707,30 @@ mod UserAuth {
                         timestamp: current_time,
                     });
                 }
+            }
+        }
+    }
+    
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_USER_AUTH);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ACCESS_CONTROL);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_USER_AUTH {
+                (1,)
+            } else {
+                (0,)
             }
         }
     }

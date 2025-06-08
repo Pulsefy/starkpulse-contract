@@ -1,3 +1,35 @@
+// -----------------------------------------------------------------------------
+// StarkPulse PortfolioTracker Contract
+// -----------------------------------------------------------------------------
+//
+// Overview:
+// This contract tracks user portfolios, asset balances, and integrates with analytics for the StarkPulse ecosystem.
+//
+// Features:
+// - Tracks balances of multiple assets per user
+// - Stores asset lists and last update timestamps
+// - Admin-controlled asset management
+// - Analytics integration for on-chain activity tracking
+//
+// Security Considerations:
+// - Only admin can perform privileged actions (e.g., asset management)
+// - All critical functions validate caller permissions and input values
+// - Zero address checks prevent accidental asset loss
+//
+// Example Usage:
+//
+// // Deploying the contract (pseudo-code):
+// let tracker = PortfolioTracker.deploy(admin=ADMIN_ADDRESS);
+//
+// // Add/update asset for user:
+// tracker.update_asset(USER_ADDRESS, ASSET_ADDRESS, AMOUNT);
+//
+// // Get user asset list:
+// tracker.get_user_assets(USER_ADDRESS);
+//
+// For integration and more examples, see INTEGRATION_GUIDE.md.
+// -----------------------------------------------------------------------------
+
 %lang starknet
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,6 +53,8 @@ use zeroable::Zeroable;
 use traits::Into;
 use box::BoxTrait;
 use option::OptionTrait;
+use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+use starkpulse::utils::error_handling::{ErrorHandling, ErrorHandlingImpl, error_codes};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Asset struct & Storage
@@ -34,11 +68,11 @@ struct Asset {
 
 #[storage]
 struct Storage {
-    // Mapping (user, asset_address) → Asset
+    // user_assets: Mapping (user, asset_address) → Asset struct (tracks amount and last update)
     user_assets: LegacyMap::<(ContractAddress, ContractAddress), Asset>,
-    // For each user, list of held asset addresses
+    // user_asset_list: Mapping user → list of held asset addresses
     user_asset_list: LegacyMap::<ContractAddress, Array<ContractAddress>>,
-    // Admin address
+    // admin: Admin address with privileged permissions
     admin: ContractAddress,
 }
 
@@ -47,6 +81,12 @@ struct Storage {
 // ─────────────────────────────────────────────────────────────────────────────
 // Replace 0x012345 with the real address from your deploy!
 const ANALYTICS_ADDRESS: ContractAddress = ContractAddressConst::<0x012345>();
+
+// Metadata constants
+const CONTRACT_VERSION: felt252 = '1.0.0';
+const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#portfolio-tracker';
+const INTERFACE_PORTFOLIO: felt252 = 'IPortfolioTracker';
+const DEPENDENCY_ANALYTICS: felt252 = 'IAnalytics';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTRACT MODULE
@@ -59,6 +99,10 @@ mod PortfolioTracker {
     // Constructor
     // ----------------------------
     #[constructor]
+    /// Contract constructor
+    /// @param admin_address The address with admin rights (can manage assets)
+    /// @dev Sets up the contract for portfolio tracking. Only admin can perform privileged actions.
+    /// @security Ensure admin_address is a trusted address.
     fn constructor(ref self: ContractState, admin_address: ContractAddress) {
         // Only the deployer can set
         self.admin.write(admin_address);
@@ -69,16 +113,30 @@ mod PortfolioTracker {
     // ----------------------------
     #[external(v0)]
     impl PortfolioTrackerImpl of IPortfolioTracker<ContractState> {
-        /// Add `amount` of `asset_address` to caller's portfolio.
+        /// Adds an asset to the caller's portfolio
+        /// @param asset_address The address of the asset to add
+        /// @param amount The amount of the asset to add
+        /// @return true if the asset was added or updated successfully
+        /// @dev Updates the asset list and last updated timestamp. Emits no event.
+        /// @security Only valid callers and asset addresses allowed. Admin can restrict further in future.
         fn add_asset(
             ref self: ContractState,
             asset_address: ContractAddress,
             amount: u256
         ) -> bool {
+            if self._paused.read() {
+                self.emit_error(error_codes::CONTRACT_PAUSED, 'Contract is paused', 0);
+                return false;
+            }
+
+            if asset_address.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid asset address', 0);
+                return false;
+            }
+
             // 1) Basic checks
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Invalid caller');
-            assert(!asset_address.is_zero(), 'Invalid asset');
 
             // 2) Timestamp
             let ts = get_block_timestamp();
@@ -189,6 +247,132 @@ mod PortfolioTracker {
             // }
 
             total
+        }
+
+        /// Update asset for a user (admin only)
+        /// @param user The user address
+        /// @param asset The asset contract address
+        /// @param amount The amount of the asset
+        /// @return true if the operation was successful
+        /// @dev This function is admin-only and bypasses normal checks.
+        /// Emits an AssetUpdated event on success.
+        /// @security Only the admin can call this function.
+        fn update_asset(
+            ref self: ContractState,
+            user: ContractAddress,
+            asset: ContractAddress,
+            amount: u256
+        ) -> bool {
+            if self._paused.read() {
+                self.emit_error(error_codes::CONTRACT_PAUSED, 'Contract is paused', 0);
+                return false;
+            }
+
+            if user.is_zero() || asset.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid user or asset address', 0);
+                return false;
+            }
+
+            let caller = get_caller_address();
+            if caller != self._admin.read() {
+                self.emit_error(error_codes::UNAUTHORIZED_ACCESS, 'Caller is not admin', 0);
+                return false;
+            }
+
+            // Update asset balance
+            self._user_assets.write((user, asset), amount);
+            self._last_updates.write(user, get_block_timestamp());
+
+            // Update asset list if needed
+            let mut asset_list = self._asset_lists.read(user);
+            if !asset_list.contains(asset) {
+                asset_list.append(asset);
+                self._asset_lists.write(user, asset_list);
+            }
+
+            // Emit event
+            self.emit(AssetUpdated { user, asset, amount });
+            true
+        }
+
+        /// Get a user's assets (public)
+        /// @param user The user address
+        /// @return Array of asset addresses
+        /// @dev This function is public and can be called by anyone.
+        /// It returns the list of assets for a given user.
+        fn get_user_assets(self: @ContractState, user: ContractAddress) -> Array<ContractAddress> {
+            if user.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid user address', 0);
+                return ArrayTrait::new();
+            }
+            
+            self._asset_lists.read(user)
+        }
+
+        /// Get the balance of an asset for a user (public)
+        /// @param user The user address
+        /// @param asset The asset contract address
+        /// @return The balance of the asset
+        /// @dev This function is public and can be called by anyone.
+        /// It returns the balance of a specific asset for a given user.
+        fn get_asset_balance(
+            self: @ContractState,
+            user: ContractAddress,
+            asset: ContractAddress
+        ) -> u256 {
+            if user.is_zero() || asset.is_zero() {
+                self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid user or asset address', 0);
+                return 0;
+            }
+
+            self._user_assets.read((user, asset))
+        }
+
+        /// Pause the contract (admin only)
+        /// @dev This function pauses all asset updates. Useful for emergency stops.
+        /// Can be called by the admin only.
+        fn pause(ref self: ContractState) {
+            let caller = get_caller_address();
+            assert(caller == self.admin.read(), 'Only admin can pause');
+
+            self.paused.write(true);
+        }
+
+        /// Unpause the contract (admin only)
+        /// @dev This function resumes the contract after a pause.
+        /// Can be called by the admin only.
+        fn unpause(ref self: ContractState) {
+            let caller = get_caller_address();
+            assert(caller == self.admin.read(), 'Only admin can unpause');
+
+            self.paused.write(false);
+        }
+    }
+
+    // ----------------------------
+    // Metadata
+    // ----------------------------
+    #[abi(embed_v0)]
+    impl MetadataImpl of IContractMetadata<ContractState> {
+        fn get_metadata(self: @ContractState) -> (metadata: ContractMetadata) {
+            let mut interfaces = ArrayTrait::new();
+            interfaces.append(INTERFACE_PORTFOLIO);
+            let mut dependencies = ArrayTrait::new();
+            dependencies.append(DEPENDENCY_ANALYTICS);
+            let metadata = ContractMetadata {
+                version: CONTRACT_VERSION,
+                documentation_url: DOC_URL,
+                interfaces: interfaces,
+                dependencies: dependencies,
+            };
+            (metadata,)
+        }
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> (supported: felt252) {
+            if interface_id == INTERFACE_PORTFOLIO {
+                (1,)
+            } else {
+                (0,)
+            }
         }
     }
 }
