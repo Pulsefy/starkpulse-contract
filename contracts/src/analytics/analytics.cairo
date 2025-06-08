@@ -1,31 +1,32 @@
 %lang starknet
 
-// =====================================================================================
-// File: contracts/src/analytics/analytics.cairo
-// =====================================================================================
-
-from starkware.starknet.common.syscalls import get_block_timestamp
+from starkware.starknet.common.syscalls import get_block_timestamp, get_caller_address
 from starkware.cairo.common.cairo_builtins import HashBuiltin
-from starkware.starknet.common.syscalls import get_caller_address
+use array::ArrayTrait;
+
+// -------------------------------------------------------------------------------------
+// EVENTS
+// -------------------------------------------------------------------------------------
+@event
+func InteractionTracked(user: ContractAddress, action_id: felt, timestamp: felt):
+end
+
+@event
+func PerformanceMetricsTracked(user: ContractAddress, action_id: felt, gas_used: felt, execution_time: felt):
+end
 
 // -------------------------------------------------------------------------------------
 // STORAGE VARS
 // -------------------------------------------------------------------------------------
 
-/// How many times `user` has done `action_id`.
-/// (Exactly what you had before.)
 @storage_var
 func interaction_count(user: ContractAddress, action_id: felt) -> (count: felt):
 end
 
-/// A running index for “how many logs” this user has.
-/// When a new log is appended, we read this, append, then increment by 1.
 @storage_var
 func interaction_index(user: ContractAddress) -> (idx: felt):
 end
 
-/// Each user’s chronological logs.  Key is (user, idx). 
-/// Value tuple is (action_id, timestamp).
 @storage_var
 func interaction_log(
     user: ContractAddress,
@@ -36,42 +37,58 @@ func interaction_log(
 ):
 end
 
-// -------------------------------------------------------------------------------------
-// EXTERNAL: track_interaction
-// -------------------------------------------------------------------------------------
+@storage_var
+func performance_log(
+    user: ContractAddress,
+    action_id: felt
+) -> (
+    total_gas: felt,
+    total_exec_time: felt,
+    entry_count: felt
+):
+end
 
-/// Call from any contract you want to “log.”  
-///   user: address calling or being tracked  
-///   action_id: a small felt (see action_ids.cairo)  
+// -------------------------------------------------------------------------------------
+// EXTERNAL FUNCTION: TRACK INTERACTION
+// -------------------------------------------------------------------------------------
 @external
 func track_interaction{syscall_ptr: felt*, range_check_ptr}(
     user: ContractAddress,
-    action_id: felt
+    action_id: felt,
+    gas_used: felt,
+    execution_time: felt
 ):
-    // ────────────────────────────────────────────────────────────────────────────────
-    // 1) Bump simple count(user, action_id)
-    // ────────────────────────────────────────────────────────────────────────────────
+    // 1. Bump interaction count
     let (old_count) = interaction_count.read(user, action_id);
     interaction_count.write(user, action_id, old_count + 1);
 
-    // ────────────────────────────────────────────────────────────────────────────────
-    // 2) Append a new “full log entry” into interaction_log
-    //    – First read the user’s current index (how many logs they already have)
-    //    – Then store (action_id, timestamp) at that index
-    //    – Then increment the index by 1.
-    // ────────────────────────────────────────────────────────────────────────────────
-    let (current_idx) = interaction_index.read(user);
-    let (ts) = get_block_timestamp();  // current block timestamp
+    // 2. Log full interaction (for history)
+    let (idx) = interaction_index.read(user);
+    let (ts) = get_block_timestamp();
+    interaction_log.write(user, idx, (action_id, ts));
+    interaction_index.write(user, idx + 1);
 
-    interaction_log.write(user, current_idx, (action_id, ts));
-    interaction_index.write(user, current_idx + 1);
+    // 3. Emit event for off-chain tracking
+    emit InteractionTracked(user, action_id, ts);
 
+    // 4. Log performance (aggregate tracking)
+    let (prev_gas, prev_exec, prev_count) = performance_log.read(user, action_id);
+    performance_log.write(
+        user,
+        action_id,
+        (
+            prev_gas + gas_used,
+            prev_exec + execution_time,
+            prev_count + 1
+        )
+    );
+
+    emit PerformanceMetricsTracked(user, action_id, gas_used, execution_time);
     return ();
 end
 
 // -------------------------------------------------------------------------------------
-// VIEW: get_user_action_count
-//   (Identical to what you already had—just keep it.)
+// VIEWS
 // -------------------------------------------------------------------------------------
 @view
 func get_user_action_count{syscall_ptr: felt*, range_check_ptr}(
@@ -79,33 +96,18 @@ func get_user_action_count{syscall_ptr: felt*, range_check_ptr}(
     action_id: felt
 ) -> (count: felt):
     let (cnt) = interaction_count.read(user, action_id);
-    return (cnt);
+    return (cnt,);
 end
 
-// -------------------------------------------------------------------------------------
-// VIEW: get_user_logs
-//   Returns a slice of (action_id, timestamp) for a given user.
-//   - “start” is the starting index (0-based).  
-//   - “length” is how many consecutive entries to return.
-//   For instance, start=0, length=5 returns the first 5 logs. 
-//   If length goes past the end, missing entries default to (0,0).
-// -------------------------------------------------------------------------------------
 @view
 func get_user_logs{syscall_ptr: felt*, range_check_ptr}(
     user: ContractAddress,
     start: felt,
     length: felt
 ) -> (logs: Array<(felt, felt)>):
-    // Prepare a dynamic array (ArrayTrait) to hold our results.
     let mut result: Array<(felt, felt)> = ArrayTrait::new();
-
-    // Read the user’s “total logs so far” so we can bound-check.
     let (total_idx) = interaction_index.read(user);
 
-    // For i in [0 .. length-1]:
-    //    real_idx = start + i
-    //    if real_idx < total_idx: read from interaction_log
-    //    else: append (0,0) as “empty slot”
     let mut i = 0;
     while i < length:
         let real_idx = start + i;
@@ -113,21 +115,31 @@ func get_user_logs{syscall_ptr: felt*, range_check_ptr}(
             let (aid, ts) = interaction_log.read(user, real_idx);
             result.append((aid, ts));
         } else {
-            // If user hasn’t logged that far, return a dummy (0,0).
             result.append((0, 0));
         }
         i += 1;
-    }
+    end
     return (result,);
 end
 
+@view
+func get_performance_summary{syscall_ptr: felt*, range_check_ptr}(
+    user: ContractAddress,
+    action_id: felt
+) -> (avg_gas: felt, avg_exec_time: felt):
+    let (total_gas, total_exec, count) = performance_log.read(user, action_id);
+    if count == 0 {
+        return (0, 0);
+    } else {
+        return (total_gas / count, total_exec / count);
+    }
+end
+
 // -------------------------------------------------------------------------------------
-// METADATA (unchanged from your original file; just keep it exactly as you had)
+// METADATA
 // -------------------------------------------------------------------------------------
 use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
-use array::ArrayTrait;
 
-// Metadata constant
 const CONTRACT_VERSION: felt252 = '1.0.0';
 const DOC_URL: felt252 = 'https://github.com/Pulsefy/starkpulse-contract?tab=readme-ov-file#analytics-store';
 const INTERFACE_ANALYTICS: felt252 = 'IAnalytics';
