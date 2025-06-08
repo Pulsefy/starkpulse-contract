@@ -3,24 +3,6 @@ mod ContractInteraction {
     use starknet::{ContractAddress, get_caller_address};
     use starknet::storage::Map;
     use zeroable::Zeroable;
-    
-    #[storage]
-    struct Storage {
-        // Contract registry
-        registered_contracts: Map<felt252, ContractAddress>,
-        // Caller approvals
-        approved_callers: Map<(felt252, ContractAddress), bool>,
-        // Admin address
-        admin: ContractAddress
-    }
-    
-    #[event]
-    #[derive(Drop, starknet::Event)]
-    enum Event {#[starknet::contract]
-mod ContractInteraction {
-    use starknet::{ContractAddress, get_caller_address};
-    use starknet::storage::Map;
-    use zeroable::Zeroable;
     use contracts::src::interfaces::i_contract_interaction::{BatchCallDescriptor, BatchCallResult};
     use starknet::pedersen_hash_array;
     
@@ -76,6 +58,29 @@ mod ContractInteraction {
         self.admin.write(admin_address);
     }
     
+    // Utility: tightly pack calldata for contract calls
+    fn pack_calldata(params: Array<felt252>) -> Array<felt252> {
+        // In a real implementation, this would remove unnecessary zero-padding and pack values efficiently.
+        // For demonstration, we remove trailing zeros (common Cairo inefficiency) and return the packed array.
+        let mut packed = ArrayTrait::new();
+        let len = params.len();
+        let mut last_nonzero = 0;
+        let mut i = 0;
+        while i < len {
+            if params.at(i) != 0 {
+                last_nonzero = i;
+            }
+            i += 1;
+        }
+        // Copy up to last nonzero
+        i = 0;
+        while i <= last_nonzero {
+            packed.append(params.at(i));
+            i += 1;
+        }
+        packed
+    }
+
     #[abi(embed_v0)]
     impl ContractInteractionImpl of super::IContractInteraction<ContractState> {
         fn register_contract(
@@ -165,32 +170,22 @@ mod ContractInteraction {
             let contract_address = self.registered_contracts.read(contract_name);
             assert(!contract_address.is_zero(), "Contract not registered");
             
-            // Check cache first
-            let calldata_hash = starknet::hash_calldata(calldata.span());
-            let cache_key = (contract_name, function_name, calldata_hash);
-            let mut result = self.cached_results.read(cache_key);
-            
-            if result.is_empty() {
-                // Execute the call
-                let success = starknet::call_contract_syscall(
-                    contract_address,
-                    function_name,
-                    calldata.span(),
-                    result.span()
-                );
-                
-                assert(success == 0, "Contract call failed");
-                
-                // Update cache
-                self.cached_results.write(cache_key, result);
-            }
-            
+            // --- Calldata packing optimization ---
+            let packed_calldata = Self::pack_calldata(calldata);
+            // Execute the call
+            let mut result = ArrayTrait::new();
+            let success = starknet::call_contract_syscall(
+                contract_address,
+                function_name,
+                packed_calldata.span(),
+                result.span()
+            );
+            assert(success == 0, "Contract call failed");
             self.emit(ContractCalled {
                 contract_name: contract_name,
                 function_name: function_name,
                 caller: caller
             });
-            
             result
         }
         
@@ -249,162 +244,6 @@ mod ContractInteraction {
                 i += 1;
             }
             results
-        }
-    }
-    
-    #[generate_trait]
-    impl HelperImpl of HelperTrait {
-        fn assert_only_admin(ref self: ContractState) {
-            let caller = get_caller_address();
-            let admin = self.admin.read();
-            assert(caller == admin, "Caller is not admin");
-        }
-    }
-}
-        ContractRegistered: ContractRegistered,
-        CallerApproved: CallerApproved,
-        CallerRevoked: CallerRevoked,
-        ContractCalled: ContractCalled
-    }
-    
-    #[derive(Drop, starknet::Event)]
-    struct ContractRegistered {
-        contract_name: felt252,
-        contract_address: ContractAddress
-    }
-    
-    #[derive(Drop, starknet::Event)]
-    struct CallerApproved {
-        contract_name: felt252,
-        caller_address: ContractAddress
-    }
-    
-    #[derive(Drop, starknet::Event)]
-    struct CallerRevoked {
-        contract_name: felt252,
-        caller_address: ContractAddress
-    }
-    
-    #[derive(Drop, starknet::Event)]
-    struct ContractCalled {
-        contract_name: felt252,
-        function_name: felt252,
-        caller: ContractAddress
-    }
-    
-    #[constructor]
-    fn constructor(ref self: ContractState, admin_address: ContractAddress) {
-        assert(!admin_address.is_zero(), "Invalid admin address");
-        self.admin.write(admin_address);
-    }
-    
-    #[abi(embed_v0)]
-    impl ContractInteractionImpl of super::IContractInteraction<ContractState> {
-        fn register_contract(
-            ref self: ContractState,
-            contract_name: felt252,
-            contract_address: ContractAddress
-        ) -> bool {
-            self.assert_only_admin();
-            assert(!contract_address.is_zero(), "Invalid contract address");
-            
-            // Check if contract already registered
-            let existing_address = self.registered_contracts.read(contract_name);
-            assert(existing_address.is_zero(), "Contract already registered");
-            
-            self.registered_contracts.write(contract_name, contract_address);
-            
-            self.emit(ContractRegistered {
-                contract_name: contract_name,
-                contract_address: contract_address
-            });
-            
-            true
-        }
-        
-        fn approve_caller(
-            ref self: ContractState,
-            contract_name: felt252,
-            caller_address: ContractAddress
-        ) -> bool {
-            self.assert_only_admin();
-            assert(!caller_address.is_zero(), "Invalid caller address");
-            
-            // Verify contract exists
-            let contract_address = self.registered_contracts.read(contract_name);
-            assert(!contract_address.is_zero(), "Contract not registered");
-            
-            self.approved_callers.write((contract_name, caller_address), true);
-            
-            self.emit(CallerApproved {
-                contract_name: contract_name,
-                caller_address: caller_address
-            });
-            
-            true
-        }
-        
-        fn revoke_caller(
-            ref self: ContractState,
-            contract_name: felt252,
-            caller_address: ContractAddress
-        ) -> bool {
-            self.assert_only_admin();
-            assert(!caller_address.is_zero(), "Invalid caller address");
-            
-            self.approved_callers.write((contract_name, caller_address), false);
-            
-            self.emit(CallerRevoked {
-                contract_name: contract_name,
-                caller_address: caller_address
-            });
-            
-            true
-        }
-        
-        fn get_contract_address(
-            self: @ContractState,
-            contract_name: felt252
-        ) -> ContractAddress {
-            let address = self.registered_contracts.read(contract_name);
-            assert(!address.is_zero(), "Contract not registered");
-            address
-        }
-        
-        fn call_contract(
-            ref self: ContractState,
-            contract_name: felt252,
-            function_name: felt252,
-            calldata: Array<felt252>
-        ) -> Array<felt252> {
-            let caller = get_caller_address();
-            
-            // Verify caller is approved
-            let is_approved = self.approved_callers.read((contract_name, caller));
-            assert(is_approved, "Caller not approved");
-            
-            // Get contract address
-            let contract_address = self.registered_contracts.read(contract_name);
-            assert(!contract_address.is_zero(), "Contract not registered");
-            
-            // Execute the call
-            let mut result = ArrayTrait::new();
-            let success = starknet::call_contract_syscall(
-                contract_address,
-                function_name,
-                calldata.span(),
-                result.span()
-            );
-            
-            assert(success == 0, "Contract call failed");
-            
-            self.emit(ContractCalled {
-                contract_name: contract_name,
-                function_name: function_name,
-                caller: caller
-            });
-            
-            result
         }
     }
     
