@@ -67,7 +67,9 @@
 
 #[starknet::contract]
 mod StarkPulseToken {
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::ContractAddress;
+    use starknet::get_caller_address;
+    use starkpulse::utils::error_handling::{ErrorHandling, ErrorHandlingImpl, error_codes};
     use crate::tokens::erc20_token::{ERC20Token, IERC20Extended};
     use crate::interfaces::i_erc20::IERC20;
     use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
