@@ -22,6 +22,8 @@ mod UserAuth {
     
     // Constants for session duration (in seconds)
     const DEFAULT_SESSION_DURATION: u64 = 86400; // 24 hours
+    const MAX_FAILED_LOGIN_ATTEMPTS: u32 = 5;
+    const LOGIN_COOLDOWN: u64 = 300; // 5 minutes
     
     // Constants for roles
     const ROLE_ADMIN: felt252 = 'ADMIN';
@@ -51,11 +53,15 @@ mod UserAuth {
         // Emergency recovery addresses
         recovery_addresses: Map<ContractAddress, ContractAddress>,
         
-        // Error handling
-        _is_active: Map<ContractAddress, bool>,
-        _is_blocked: Map<ContractAddress, bool>,
-        _registration_time: Map<ContractAddress, u64>,
-    }
+    // MFA management
+    mfa_backup_codes: Map<ContractAddress, Array<felt252>>,
+
+    // Error handling
+    _is_active: Map<ContractAddress, bool>,
+    _is_blocked: Map<ContractAddress, bool>,
+    _registration_time: Map<ContractAddress, u64>,
+}
+
 
     #[event]
     #[derive(Drop, starknet::Event)]
@@ -64,12 +70,16 @@ mod UserAuth {
         UserLoggedIn: UserLoggedIn,
         UserLoggedOut: UserLoggedOut,
         SessionExpired: SessionExpired,
+        SessionRenewed: SessionRenewed,
         ProfileUpdated: ProfileUpdated,
         UsernameChanged: UsernameChanged,
         ProfileDeleted: ProfileDeleted,
         AdminRightsTransferred: AdminRightsTransferred,
         EmergencyRecoverySet: EmergencyRecoverySet,
         EmergencyRecoveryUsed: EmergencyRecoveryUsed,
+        MFAEnabled: MFAEnabled,
+        MFADisabled: MFADisabled,
+        LoginAttemptFailed: LoginAttemptFailed,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -97,6 +107,14 @@ mod UserAuth {
     struct SessionExpired {
         user: ContractAddress,
         session_id: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct SessionRenewed {
+        user: ContractAddress,
+        session_id: felt252,
+        new_expiry: u64,
         timestamp: u64,
     }
 
@@ -142,6 +160,25 @@ mod UserAuth {
         timestamp: u64,
     }
 
+    #[derive(Drop, starknet::Event)]
+    struct MFAEnabled {
+        user: ContractAddress,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct MFADisabled {
+        user: ContractAddress,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct LoginAttemptFailed {
+        user: ContractAddress,
+        reason: felt252,
+        timestamp: u64,
+    }
+
     #[constructor]
     fn constructor(ref self: ContractState, admin_address: ContractAddress) {
         // Initialize contract
@@ -157,7 +194,8 @@ mod UserAuth {
             ref self: ContractState,
             username: felt252,
             display_name: felt252,
-            email_hash: felt252
+            email_hash: felt252,
+            mfa_secret: felt252
         ) -> bool {
             let caller = get_caller_address();
             
@@ -181,6 +219,11 @@ mod UserAuth {
                 email_hash: email_hash,
                 created_at: get_block_timestamp(),
                 last_login: 0,
+                mfa_enabled: false,
+                mfa_secret: mfa_secret,
+                failed_login_attempts: 0,
+                last_failed_login: 0,
+                role: ROLE_USER,
             };
             
             // Store user data
@@ -209,13 +252,21 @@ mod UserAuth {
             ref self: ContractState,
             signature: Array<felt252>,
             message_hash: felt252,
-            nonce: u64
+            nonce: u64,
+            mfa_code: felt252
         ) -> felt252 {
             let caller = get_caller_address();
             
             // Verify user exists
-            let user = self.users.read(caller);
+            let mut user = self.users.read(caller);
             assert(!user.address.is_zero(), "User not registered");
+            
+            // Check for login cooldown
+            let current_time = get_block_timestamp();
+            if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS {
+                let cooldown_end = user.last_failed_login + LOGIN_COOLDOWN;
+                assert(current_time >= cooldown_end, "Account temporarily locked");
+            }
             
             // Verify nonce
             let current_nonce = self.user_nonces.read(caller);
@@ -223,6 +274,13 @@ mod UserAuth {
             
             // Verify signature (simplified - in production would use proper signature verification)
             assert(signature.len() > 0, "Invalid signature");
+            
+            // Verify MFA if enabled
+            if user.mfa_enabled {
+                assert(mfa_code != 0, "MFA code required");
+                // In production, implement proper TOTP verification
+                assert(mfa_code == user.mfa_secret, "Invalid MFA code");
+            }
             
             // Increment nonce to prevent replay attacks
             self.user_nonces.write(caller, current_nonce + 1);
@@ -239,15 +297,17 @@ mod UserAuth {
                 created_at: timestamp,
                 expires_at: timestamp + DEFAULT_SESSION_DURATION,
                 last_activity: timestamp,
+                mfa_verified: user.mfa_enabled,
+                device_info: message_hash, // In production, would include device fingerprint
             };
             
             // Store session
             self.user_sessions.write(caller, session);
             
-            // Update last login time
-            let mut user_profile = self.users.read(caller);
-            user_profile.last_login = timestamp;
-            self.users.write(caller, user_profile);
+            // Update user profile
+            user.last_login = timestamp;
+            user.failed_login_attempts = 0;
+            self.users.write(caller, user);
             
             // Increment session count
             let current_count = self.session_count.read();
@@ -261,6 +321,128 @@ mod UserAuth {
             });
             
             session_id
+        }
+        
+        // MFA Management
+        fn enable_mfa(ref self: ContractState, mfa_secret: felt252) -> bool {
+            let caller = get_caller_address();
+            let mut user = self.users.read(caller);
+            
+            assert(!user.mfa_enabled, "MFA already enabled");
+            assert(mfa_secret != 0, "Invalid MFA secret");
+            
+            user.mfa_enabled = true;
+            user.mfa_secret = mfa_secret;
+            self.users.write(caller, user);
+            
+            self.emit(MFAEnabled {
+                user: caller,
+                timestamp: get_block_timestamp(),
+            });
+            
+            true
+        }
+        
+        fn disable_mfa(ref self: ContractState, mfa_code: felt252) -> bool {
+            let caller = get_caller_address();
+            let mut user = self.users.read(caller);
+            
+            assert(user.mfa_enabled, "MFA not enabled");
+            assert(mfa_code == user.mfa_secret, "Invalid MFA code");
+            
+            user.mfa_enabled = false;
+            user.mfa_secret = 0;
+            self.users.write(caller, user);
+            
+            self.emit(MFADisabled {
+                user: caller,
+                timestamp: get_block_timestamp(),
+            });
+            
+            true
+        }
+        
+        fn verify_mfa(self: @ContractState, user_address: ContractAddress, mfa_code: felt252) -> bool {
+            let user = self.users.read(user_address);
+            if !user.mfa_enabled {
+                return true;
+            }
+            
+            mfa_code == user.mfa_secret
+        }
+        
+        // Session Management
+        fn renew_session(ref self: ContractState, session_id: felt252) -> bool {
+            let caller = get_caller_address();
+            let mut session = self.user_sessions.read(caller);
+            
+            assert(session.id == session_id, "Invalid session ID");
+            assert(session.status == SESSION_ACTIVE, "Session not active");
+            
+            let current_time = get_block_timestamp();
+            assert(current_time < session.expires_at, "Session already expired");
+            
+            // Renew session
+            session.expires_at = current_time + DEFAULT_SESSION_DURATION;
+            session.last_activity = current_time;
+            self.user_sessions.write(caller, session);
+            
+            self.emit(SessionRenewed {
+                user: caller,
+                session_id: session_id,
+                new_expiry: session.expires_at,
+                timestamp: current_time,
+            });
+            
+            true
+        }
+        
+        // Account Recovery
+        fn recover_account(
+            ref self: ContractState,
+            user_address: ContractAddress,
+            recovery_proof: Array<felt252>
+        ) -> bool {
+            let caller = get_caller_address();
+            let recovery_address = self.recovery_addresses.read(user_address);
+            
+            assert(recovery_address == caller, "Unauthorized recovery attempt");
+            assert(recovery_proof.len() > 0, "Invalid recovery proof");
+            
+            // In production, implement proper recovery proof verification
+            
+            // Reset user's failed login attempts
+            let mut user = self.users.read(user_address);
+            user.failed_login_attempts = 0;
+            user.last_failed_login = 0;
+            self.users.write(user_address, user);
+            
+            // Invalidate all existing sessions
+            let session = Session {
+                id: 0,
+                user: user_address,
+                status: SESSION_LOGGED_OUT,
+                created_at: get_block_timestamp(),
+                expires_at: 0,
+                last_activity: 0,
+                mfa_verified: false,
+                device_info: 0,
+            };
+            self.user_sessions.write(user_address, session);
+            
+            self.emit(EmergencyRecoveryUsed {
+                user: user_address,
+                recovery_address: caller,
+                timestamp: get_block_timestamp(),
+            });
+            
+            true
+        }
+        
+        // View Functions
+        fn is_mfa_enabled(self: @ContractState, user_address: ContractAddress) -> bool {
+            let user = self.users.read(user_address);
+            user.mfa_enabled
         }
         
         // Logout functionality
@@ -451,45 +633,6 @@ mod UserAuth {
                 user: caller,
                 recovery_address: recovery_address,
                 timestamp: get_block_timestamp(),
-            });
-            
-            true
-        }
-        
-        // Emergency account recovery
-        fn recover_account(ref self: ContractState, user_address: ContractAddress) -> bool {
-            let caller = get_caller_address();
-            
-            // Verify recovery relationship
-            let recovery_address = self.recovery_addresses.read(user_address);
-            assert(recovery_address == caller, "Not authorized for recovery");
-            
-            // Generate new session for the user
-            let timestamp = get_block_timestamp();
-            let session_id = timestamp.into(); // Simple session ID generation
-            
-            // Create new session
-            let session = Session {
-                id: session_id,
-                user: user_address,
-                status: SESSION_ACTIVE,
-                created_at: timestamp,
-                expires_at: timestamp + DEFAULT_SESSION_DURATION,
-                last_activity: timestamp,
-            };
-            
-            // Store session
-            self.user_sessions.write(user_address, session);
-            
-            // Increment session count
-            let current_count = self.session_count.read();
-            self.session_count.write(current_count + 1);
-            
-            // Emit event
-            self.emit(EmergencyRecoveryUsed {
-                user: user_address,
-                recovery_address: caller,
-                timestamp: timestamp,
             });
             
             true
