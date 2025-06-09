@@ -8,12 +8,18 @@ mod interfaces {
     pub mod i_transaction_monitor;
     pub mod i_portfolio_tracker;
     pub mod i_error_handling;
+    pub mod i_upgradeable;
 }
 
 // Utility modules
 mod utils {
     pub mod access_control;
     pub mod error_handling;
+}
+
+// Proxy modules
+mod upgradeable {
+    pub mod upgradeable;
 }
 
 // Main modules
