@@ -66,11 +66,11 @@ fn migrate(ref self: ContractState) {
 
 ```rust
 #[abi(embed_v0)]
-fn upgrade(ref self: ContractState, new_class_hash: felt252, new_version: u256) {
-    // Admin-only access control can be added here
-    replace_class_syscall(new_class_hash);
-    self.version.write(new_version);
-}
+fn upgrade(ref self: ContractState, new_class_hash: ClassHash, new_version: u256) {
+     // Admin-only access control can be added here
+     replace_class_syscall(new_class_hash);
+     self.version.write(new_version);
+ }
 ```
 ---
 

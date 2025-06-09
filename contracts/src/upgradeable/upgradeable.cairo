@@ -39,8 +39,9 @@ pub mod upgradeable {
             let caller = get_caller_address();
             assert(caller == self.admin.read(), 'Only admin can upgrade');
             assert(new_version > self.version.read(), 'Version must increase');
+            assert(!new_class_hash.is_zero(), 'Invalid class hash');
             
-            replace_class_syscall(new_class_hash).unwrap(); // Update the contract's class
+            replace_class_syscall(new_class_hash).expect('Upgrade failed');
             self.version.write(new_version); // Update version in storage
             
             self.emit(Event::Upgraded(Upgraded {
