@@ -1,6 +1,6 @@
 #[starknet::contract]
 mod ContractInteraction {
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
     use starknet::storage::Map;
     use zeroable::Zeroable;
     use contracts::src::interfaces::i_contract_interaction::{BatchCallDescriptor, BatchCallResult};
@@ -15,7 +15,40 @@ mod ContractInteraction {
         // Admin address
         admin: ContractAddress,
         // Caching for call results
-        cached_results: Map<(felt252, felt252, felt252), Array<felt252>>
+        cached_results: Map<(felt252, felt252, felt252), Array<felt252>>,
+        // Rate limiting: per-user (address → [count, last_timestamp])
+        user_rate: Map<ContractAddress, (u64, u64)>,
+        // Global rate limiting: [count, last_timestamp]
+        global_rate_count: u64,
+        global_rate_last_timestamp: u64,
+        // Adaptive rate limiting: stores current global threshold
+        adaptive_global_limit: u64,
+        // Trusted user bypass (uses AccessControl roles, but can cache here if needed)
+    }
+
+    // Rate limiting role constant
+    const TRUSTED_USER_ROLE: felt252 = 'TRUSTED_USER_ROLE';
+
+    // Rate limiting events
+    #[derive(Drop, starknet::Event)]
+    struct RateLimitHit {
+        user: ContractAddress,
+        is_global: bool,
+        current_count: u64,
+        limit: u64,
+        timestamp: u64,
+    }
+    #[derive(Drop, starknet::Event)]
+    struct RateLimitBypass {
+        user: ContractAddress,
+        reason: felt252,
+        timestamp: u64,
+    }
+    #[derive(Drop, starknet::Event)]
+    struct RateLimitAdjusted {
+        new_limit: u64,
+        reason: felt252,
+        timestamp: u64,
     }
     
     #[event]
@@ -161,6 +194,8 @@ mod ContractInteraction {
             calldata: Array<felt252>
         ) -> Array<felt252> {
             let caller = get_caller_address();
+            // Rate limiting check
+            assert(self.check_rate_limits(caller), "Rate limit exceeded");
             
             // Verify caller is approved
             let is_approved = self.approved_callers.read((contract_name, caller));
@@ -195,6 +230,10 @@ mod ContractInteraction {
             use_cache: bool,
             retry_count: u8
         ) -> Array<BatchCallResult> {
+            let caller = get_caller_address();
+            // Rate limiting check (batch counts as one interaction)
+            assert(self.check_rate_limits(caller), "Rate limit exceeded");
+            
             let mut results = ArrayTrait::new();
             let len = calls.len();
             let mut i = 0;
@@ -244,6 +283,62 @@ mod ContractInteraction {
                 i += 1;
             }
             results
+        }
+        
+        fn check_rate_limits(ref self: ContractState, caller: ContractAddress) -> bool {
+            // Trusted user bypass
+            let access_control_address = self.admin.read(); // For demo, assume admin is access control contract
+            let is_trusted = contracts::src::utils::access_control::AccessControl::has_role(
+                access_control_address, TRUSTED_USER_ROLE, caller
+            );
+            let now = get_block_timestamp();
+            if is_trusted {
+                self.emit(RateLimitBypass {
+                    user: caller,
+                    reason: 'trusted_user',
+                    timestamp: now,
+                });
+                return true;
+            }
+            // Per-user rate limiting
+            let (user_count, user_last) = self.user_rate.read(caller);
+            let user_limit = 10; // Example static limit
+            if user_last == now {
+                if user_count >= user_limit {
+                    self.emit(RateLimitHit {
+                        user: caller,
+                        is_global: false,
+                        current_count: user_count,
+                        limit: user_limit,
+                        timestamp: now,
+                    });
+                    return false;
+                }
+                self.user_rate.write(caller, (user_count + 1, now));
+            } else {
+                self.user_rate.write(caller, (1, now));
+            }
+            // Global rate limiting
+            let global_last = self.global_rate_last_timestamp.read();
+            let global_count = self.global_rate_count.read();
+            let global_limit = self.adaptive_global_limit.read();
+            if global_last == now {
+                if global_count >= global_limit {
+                    self.emit(RateLimitHit {
+                        user: caller,
+                        is_global: true,
+                        current_count: global_count,
+                        limit: global_limit,
+                        timestamp: now,
+                    });
+                    return false;
+                }
+                self.global_rate_count.write(global_count + 1);
+            } else {
+                self.global_rate_count.write(1);
+                self.global_rate_last_timestamp.write(now);
+            }
+            return true;
         }
     }
     
