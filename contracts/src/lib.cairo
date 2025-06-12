@@ -9,12 +9,15 @@ mod interfaces {
     pub mod i_portfolio_tracker;
     pub mod i_error_handling;
     pub mod i_upgradeable;
+    pub mod i_security_monitor;
 }
 
 // Utility modules
 mod utils {
     pub mod access_control;
     pub mod error_handling;
+    pub mod crypto_utils;
+    pub mod security_monitor;
 }
 
 // Proxy modules
@@ -37,4 +40,6 @@ mod tests {
     pub mod test_starkpulse_token;
     pub mod test_access_control;
     pub mod test_event_emission;
+    pub mod test_transaction_security;
+    pub mod test_anomaly_detection;
 }
