@@ -41,6 +41,8 @@ mod TransactionMonitor {
     use contracts::src::interfaces::i_transaction_monitor::{ITransactionMonitor, Transaction, TransactionMonitorTypes};
     use contracts::src::utils::access_control::{AccessControl, IAccessControl};
     use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
+    // Note: In production, these would be proper contract dispatchers
+    // For now, we'll implement simplified versions inline
     use array::ArrayTrait;
 
     // Metadata constants
@@ -82,6 +84,13 @@ mod TransactionMonitor {
         access_control: IAccessControl,
         // admin: Admin address with privileged permissions
         admin: ContractAddress,
+        // Security enhancements (simplified for testing)
+        // crypto_utils: ICryptoUtils,
+        // security_monitor: ISecurityMonitor,
+        transaction_proofs: Map<felt252, felt252>,
+        audit_trails: Map<felt252, Array<felt252>>,
+        flagged_transactions: Map<felt252, bool>,
+        hash_chain_latest: felt252,
     }
 
     #[event]
@@ -90,6 +99,10 @@ mod TransactionMonitor {
         TransactionRecorded: TransactionRecorded,
         TransactionStatusUpdated: TransactionStatusUpdated,
         NotificationPreferencesSet: NotificationPreferencesSet,
+        TransactionVerified: TransactionVerified,
+        TransactionProofCreated: TransactionProofCreated,
+        SuspiciousTransactionFlagged: SuspiciousTransactionFlagged,
+        SecurityAuditEvent: SecurityAuditEvent,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -116,16 +129,64 @@ mod TransactionMonitor {
         enabled: bool,
     }
 
+    #[derive(Drop, starknet::Event)]
+    struct TransactionVerified {
+        tx_hash: felt252,
+        verified: bool,
+        integrity_hash: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct TransactionProofCreated {
+        tx_hash: felt252,
+        proof_hash: felt252,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct SuspiciousTransactionFlagged {
+        tx_hash: felt252,
+        user: ContractAddress,
+        reason: felt252,
+        risk_score: u256,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct SecurityAuditEvent {
+        event_type: felt252,
+        tx_hash: felt252,
+        user: ContractAddress,
+        details: felt252,
+        timestamp: u64,
+    }
+
     #[constructor]
     /// Contract constructor
     /// @param admin_address The address with admin rights (can manage transactions and notifications)
+    /// @param crypto_utils_address Address of the crypto utilities contract (unused for now)
+    /// @param security_monitor_address Address of the security monitor contract (unused for now)
     /// @dev Sets up the contract for transaction monitoring. Only admin can perform privileged actions.
     /// @security Ensure admin_address is a trusted address.
-    fn constructor(ref self: ContractState, admin_address: ContractAddress) {
+    fn constructor(
+        ref self: ContractState,
+        admin_address: ContractAddress,
+        crypto_utils_address: ContractAddress,
+        security_monitor_address: ContractAddress
+    ) {
         // Initialize contract
         self.admin.write(admin_address);
         self.transaction_count.write(0);
-        
+
+        // Initialize security components (placeholder - in production these would be proper dispatchers)
+        // self.crypto_utils.write(ICryptoUtilsDispatcher { contract_address: crypto_utils_address });
+        // self.security_monitor.write(ISecurityMonitorDispatcher { contract_address: security_monitor_address });
+
+        // Initialize hash chain
+        let genesis_hash = 'STARKPULSE_TX_GENESIS';
+        self.hash_chain_latest.write(genesis_hash);
+
         // Set default notification preferences (all enabled)
         let caller = get_caller_address();
         self.user_notification_preferences.write((caller, NOTIFY_ALL), true);
@@ -173,7 +234,27 @@ mod TransactionMonitor {
             let existing_tx = self.transactions.read(tx_hash);
             assert(existing_tx.tx_hash == 0, "Transaction already exists");
             
-            // Create transaction record
+            // Generate cryptographic integrity hash (placeholder implementation)
+            let integrity_hash = starknet::pedersen_hash(
+                starknet::pedersen_hash(tx_hash, caller.into()),
+                starknet::pedersen_hash(amount.low.into(), get_block_timestamp())
+            );
+
+            // Perform anomaly detection (placeholder - calculate basic risk score)
+            let risk_score = if amount > 1000000000000000000000 { // > 1000 tokens
+                500
+            } else if amount > 100000000000000000000 { // > 100 tokens
+                200
+            } else {
+                50
+            };
+
+            // Create tamper-evident hash chain entry (placeholder)
+            let previous_hash = self.hash_chain_latest.read();
+            let chain_entry_hash = starknet::pedersen_hash(previous_hash, tx_hash);
+            self.hash_chain_latest.write(chain_entry_hash);
+
+            // Create transaction record with security fields
             let transaction = Transaction {
                 tx_hash: tx_hash,
                 user: caller,
@@ -182,6 +263,11 @@ mod TransactionMonitor {
                 timestamp: get_block_timestamp(),
                 status: STATUS_PENDING,
                 description: description,
+                integrity_hash: integrity_hash,
+                proof_hash: 0, // Will be set when proof is created
+                verified: false,
+                flagged: false,
+                risk_score: risk_score,
             };
             
             // Store transaction
@@ -364,6 +450,182 @@ mod TransactionMonitor {
             assert(transaction.tx_hash != 0, "Transaction does not exist");
             
             transaction
+        }
+
+        // Security Functions
+        fn verify_transaction_integrity(
+            self: @ContractState,
+            tx_hash: felt252,
+            signature: Array<felt252>
+        ) -> bool {
+            // Get transaction
+            let transaction = self.transactions.read(tx_hash);
+            assert(transaction.tx_hash != 0, "Transaction does not exist");
+
+            // Verify integrity hash (placeholder implementation)
+            let computed_hash = starknet::pedersen_hash(
+                starknet::pedersen_hash(transaction.tx_hash, transaction.user.into()),
+                starknet::pedersen_hash(transaction.amount.low.into(), transaction.timestamp)
+            );
+
+            if computed_hash != transaction.integrity_hash {
+                return false;
+            }
+
+            // Verify signature if provided
+            if signature.len() > 0 {
+                // In production, implement proper signature verification
+                // For now, simplified verification
+                let signature_valid = signature.len() >= 2;
+                if !signature_valid {
+                    return false;
+                }
+            }
+
+            // Emit verification event
+            self.emit(TransactionVerified {
+                tx_hash: tx_hash,
+                verified: true,
+                integrity_hash: computed_hash,
+                timestamp: get_block_timestamp(),
+            });
+
+            true
+        }
+
+        fn create_transaction_proof(
+            ref self: ContractState,
+            tx_hash: felt252,
+            proof_data: Array<felt252>
+        ) -> felt252 {
+            // Verify transaction exists
+            let mut transaction = self.transactions.read(tx_hash);
+            assert(transaction.tx_hash != 0, "Transaction does not exist");
+
+            // Only transaction owner or admin can create proofs
+            let caller = get_caller_address();
+            assert(
+                caller == transaction.user || caller == self.admin.read(),
+                "Not authorized to create proof"
+            );
+
+            // Create cryptographic proof (placeholder implementation)
+            let nonce = starknet::pedersen_hash(get_block_timestamp(), tx_hash);
+            let proof_hash = starknet::pedersen_hash(tx_hash, nonce);
+
+            // Store proof
+            self.transaction_proofs.write(tx_hash, proof_hash);
+
+            // Update transaction with proof hash
+            transaction.proof_hash = proof_hash;
+            self.transactions.write(tx_hash, transaction);
+
+            // Add to audit trail
+            let mut audit_trail = self.audit_trails.read(tx_hash);
+            audit_trail.append('PROOF_CREATED');
+            audit_trail.append(proof_hash);
+            audit_trail.append(get_block_timestamp());
+            self.audit_trails.write(tx_hash, audit_trail);
+
+            // Emit event
+            self.emit(TransactionProofCreated {
+                tx_hash: tx_hash,
+                proof_hash: proof_hash,
+                timestamp: get_block_timestamp(),
+            });
+
+            proof_hash
+        }
+
+        fn verify_transaction_proof(
+            self: @ContractState,
+            tx_hash: felt252,
+            proof_hash: felt252
+        ) -> bool {
+            // Get stored proof
+            let stored_proof = self.transaction_proofs.read(tx_hash);
+            if stored_proof == 0 {
+                return false;
+            }
+
+            // Verify proof matches
+            stored_proof == proof_hash
+        }
+
+        fn get_transaction_audit_trail(
+            self: @ContractState,
+            tx_hash: felt252
+        ) -> Array<felt252> {
+            // Verify transaction exists
+            let transaction = self.transactions.read(tx_hash);
+            assert(transaction.tx_hash != 0, "Transaction does not exist");
+
+            // Only transaction owner, admin, or security auditor can view audit trail
+            let caller = get_caller_address();
+            let access_control = self.access_control.read();
+            let is_authorized = caller == transaction.user ||
+                               caller == self.admin.read() ||
+                               access_control.has_role('SECURITY_AUDITOR_ROLE', caller);
+
+            assert(is_authorized, "Not authorized to view audit trail");
+
+            self.audit_trails.read(tx_hash)
+        }
+
+        fn flag_suspicious_transaction(
+            ref self: ContractState,
+            tx_hash: felt252,
+            reason: felt252
+        ) -> bool {
+            // Only admin or security auditor can flag transactions
+            let caller = get_caller_address();
+            let access_control = self.access_control.read();
+            let is_authorized = caller == self.admin.read() ||
+                               access_control.has_role('SECURITY_AUDITOR_ROLE', caller);
+
+            assert(is_authorized, "Not authorized to flag transactions");
+
+            // Get transaction
+            let mut transaction = self.transactions.read(tx_hash);
+            assert(transaction.tx_hash != 0, "Transaction does not exist");
+
+            // Flag transaction
+            transaction.flagged = true;
+            self.transactions.write(tx_hash, transaction);
+            self.flagged_transactions.write(tx_hash, true);
+
+            // Add to audit trail
+            let mut audit_trail = self.audit_trails.read(tx_hash);
+            audit_trail.append('FLAGGED');
+            audit_trail.append(reason);
+            audit_trail.append(get_block_timestamp());
+            self.audit_trails.write(tx_hash, audit_trail);
+
+            // Create security alert (placeholder - would integrate with security monitor)
+            // In production, this would call the security monitor contract
+
+            // Log security event (placeholder - would integrate with security monitor)
+            // In production, this would call the security monitor contract
+
+            // Emit event
+            self.emit(SuspiciousTransactionFlagged {
+                tx_hash: tx_hash,
+                user: transaction.user,
+                reason: reason,
+                risk_score: transaction.risk_score,
+                timestamp: get_block_timestamp(),
+            });
+
+            // Emit security audit event
+            self.emit(SecurityAuditEvent {
+                event_type: 'TRANSACTION_FLAGGED',
+                tx_hash: tx_hash,
+                user: transaction.user,
+                details: reason,
+                timestamp: get_block_timestamp(),
+            });
+
+            true
         }
     }
     

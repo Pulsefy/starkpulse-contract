@@ -40,9 +40,39 @@ trait ITransactionMonitor<TContractState> {
     
     // Transaction Details
     fn get_transaction_details(
-        self: @TContractState, 
+        self: @TContractState,
         tx_hash: felt252
     ) -> Transaction;
+
+    // Security Features
+    fn verify_transaction_integrity(
+        self: @TContractState,
+        tx_hash: felt252,
+        signature: Array<felt252>
+    ) -> bool;
+
+    fn create_transaction_proof(
+        ref self: TContractState,
+        tx_hash: felt252,
+        proof_data: Array<felt252>
+    ) -> felt252;
+
+    fn verify_transaction_proof(
+        self: @TContractState,
+        tx_hash: felt252,
+        proof_hash: felt252
+    ) -> bool;
+
+    fn get_transaction_audit_trail(
+        self: @TContractState,
+        tx_hash: felt252
+    ) -> Array<felt252>;
+
+    fn flag_suspicious_transaction(
+        ref self: TContractState,
+        tx_hash: felt252,
+        reason: felt252
+    ) -> bool;
 }
 
 #[derive(Drop, Serde, starknet::Store)]
@@ -54,6 +84,12 @@ struct Transaction {
     timestamp: u64,
     status: felt252,
     description: felt252,
+    // Security fields
+    integrity_hash: felt252,
+    proof_hash: felt252,
+    verified: bool,
+    flagged: bool,
+    risk_score: u256,
 }
 
 #[derive(Drop, Serde, starknet::Store)]

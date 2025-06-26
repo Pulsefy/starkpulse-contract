@@ -1,0 +1,264 @@
+{
+  "dashboard": {
+    "title": "StarkPulse Security Monitoring Dashboard",
+    "description": "Real-time security monitoring for StarkPulse transaction system",
+    "version": "1.0.0",
+    "refresh_interval": "30s"
+  },
+  "panels": [
+    {
+      "id": "transaction_security_overview",
+      "title": "Transaction Security Overview",
+      "type": "stat",
+      "position": { "x": 0, "y": 0, "w": 12, "h": 4 },
+      "metrics": [
+        {
+          "name": "Total Transactions",
+          "query": "sum(starkpulse_transactions_total)",
+          "color": "blue"
+        },
+        {
+          "name": "Verified Transactions",
+          "query": "sum(starkpulse_transactions_verified_total)",
+          "color": "green"
+        },
+        {
+          "name": "Flagged Transactions",
+          "query": "sum(starkpulse_transactions_flagged_total)",
+          "color": "red"
+        },
+        {
+          "name": "Integrity Verification Rate",
+          "query": "rate(starkpulse_integrity_verifications_success_total[5m]) * 100",
+          "unit": "%",
+          "color": "green"
+        }
+      ]
+    },
+    {
+      "id": "anomaly_detection_metrics",
+      "title": "Anomaly Detection Metrics",
+      "type": "graph",
+      "position": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "metrics": [
+        {
+          "name": "Anomaly Score Distribution",
+          "query": "histogram_quantile(0.95, starkpulse_anomaly_scores_bucket)",
+          "color": "orange"
+        },
+        {
+          "name": "High Risk Transactions",
+          "query": "sum(rate(starkpulse_high_risk_transactions_total[5m]))",
+          "color": "red"
+        },
+        {
+          "name": "Detection Latency",
+          "query": "histogram_quantile(0.95, starkpulse_anomaly_detection_duration_seconds_bucket)",
+          "unit": "s",
+          "color": "blue"
+        }
+      ]
+    },
+    {
+      "id": "security_alerts",
+      "title": "Security Alerts",
+      "type": "table",
+      "position": { "x": 0, "y": 10, "w": 12, "h": 6 },
+      "columns": [
+        { "name": "Timestamp", "field": "timestamp" },
+        { "name": "Alert Type", "field": "alert_type" },
+        { "name": "Priority", "field": "priority" },
+        { "name": "User", "field": "user_address" },
+        { "name": "Transaction", "field": "transaction_hash" },
+        { "name": "Status", "field": "status" }
+      ],
+      "query": "starkpulse_security_alerts",
+      "sort": { "field": "timestamp", "order": "desc" },
+      "limit": 50
+    },
+    {
+      "id": "risk_assessment_heatmap",
+      "title": "Risk Assessment Heatmap",
+      "type": "heatmap",
+      "position": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "metrics": [
+        {
+          "name": "Risk Scores by User",
+          "query": "starkpulse_user_risk_scores",
+          "x_axis": "user_address",
+          "y_axis": "hour_of_day",
+          "value": "risk_score"
+        }
+      ]
+    },
+    {
+      "id": "access_control_events",
+      "title": "Access Control Events",
+      "type": "logs",
+      "position": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "query": "starkpulse_access_control_events",
+      "fields": ["timestamp", "event_type", "user", "role", "success"],
+      "filters": [
+        { "field": "event_type", "values": ["role_granted", "role_revoked", "unauthorized_access"] }
+      ]
+    },
+    {
+      "id": "cryptographic_operations",
+      "title": "Cryptographic Operations",
+      "type": "graph",
+      "position": { "x": 0, "y": 16, "w": 12, "h": 6 },
+      "metrics": [
+        {
+          "name": "Hash Chain Entries",
+          "query": "rate(starkpulse_hash_chain_entries_total[5m])",
+          "color": "purple"
+        },
+        {
+          "name": "Proof Creations",
+          "query": "rate(starkpulse_proof_creations_total[5m])",
+          "color": "green"
+        },
+        {
+          "name": "Signature Verifications",
+          "query": "rate(starkpulse_signature_verifications_total[5m])",
+          "color": "blue"
+        },
+        {
+          "name": "Merkle Proof Validations",
+          "query": "rate(starkpulse_merkle_validations_total[5m])",
+          "color": "orange"
+        }
+      ]
+    },
+    {
+      "id": "performance_metrics",
+      "title": "Security Performance Metrics",
+      "type": "stat",
+      "position": { "x": 12, "y": 16, "w": 12, "h": 6 },
+      "metrics": [
+        {
+          "name": "Avg Anomaly Detection Time",
+          "query": "avg(starkpulse_anomaly_detection_duration_seconds)",
+          "unit": "ms",
+          "color": "blue"
+        },
+        {
+          "name": "Integrity Check Success Rate",
+          "query": "rate(starkpulse_integrity_checks_success_total[5m]) / rate(starkpulse_integrity_checks_total[5m]) * 100",
+          "unit": "%",
+          "color": "green"
+        },
+        {
+          "name": "False Positive Rate",
+          "query": "rate(starkpulse_false_positives_total[1h]) / rate(starkpulse_anomaly_detections_total[1h]) * 100",
+          "unit": "%",
+          "color": "yellow"
+        },
+        {
+          "name": "Security Events per Hour",
+          "query": "rate(starkpulse_security_events_total[1h])",
+          "color": "red"
+        }
+      ]
+    }
+  ],
+  "alerts": [
+    {
+      "name": "High Risk Transaction Detected",
+      "condition": "starkpulse_high_risk_transactions_total > 0",
+      "severity": "critical",
+      "notification_channels": ["slack", "email", "webhook"]
+    },
+    {
+      "name": "Anomaly Detection Failure",
+      "condition": "rate(starkpulse_anomaly_detection_errors_total[5m]) > 0.1",
+      "severity": "high",
+      "notification_channels": ["slack", "email"]
+    },
+    {
+      "name": "Integrity Verification Failure",
+      "condition": "rate(starkpulse_integrity_verification_failures_total[5m]) > 0.05",
+      "severity": "high",
+      "notification_channels": ["slack", "email"]
+    },
+    {
+      "name": "Unauthorized Access Attempt",
+      "condition": "rate(starkpulse_unauthorized_access_attempts_total[1m]) > 0",
+      "severity": "critical",
+      "notification_channels": ["slack", "email", "webhook", "sms"]
+    },
+    {
+      "name": "High False Positive Rate",
+      "condition": "rate(starkpulse_false_positives_total[1h]) / rate(starkpulse_anomaly_detections_total[1h]) > 0.1",
+      "severity": "medium",
+      "notification_channels": ["slack"]
+    }
+  ],
+  "data_sources": [
+    {
+      "name": "starknet_events",
+      "type": "starknet",
+      "config": {
+        "rpc_url": "${STARKNET_RPC_URL}",
+        "contracts": [
+          {
+            "name": "transaction_monitor",
+            "address": "${TRANSACTION_MONITOR_ADDRESS}",
+            "events": [
+              "TransactionRecorded",
+              "TransactionVerified",
+              "SuspiciousTransactionFlagged",
+              "SecurityAuditEvent"
+            ]
+          },
+          {
+            "name": "security_monitor",
+            "address": "${SECURITY_MONITOR_ADDRESS}",
+            "events": [
+              "AnomalyDetected",
+              "SecurityAlertCreated",
+              "SecurityEventLogged"
+            ]
+          },
+          {
+            "name": "access_control",
+            "address": "${ACCESS_CONTROL_ADDRESS}",
+            "events": [
+              "RoleGranted",
+              "RoleRevoked"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "prometheus",
+      "type": "prometheus",
+      "config": {
+        "url": "${PROMETHEUS_URL}",
+        "scrape_interval": "15s"
+      }
+    }
+  ],
+  "variables": [
+    {
+      "name": "time_range",
+      "type": "time_range",
+      "default": "1h",
+      "options": ["5m", "15m", "1h", "6h", "24h", "7d"]
+    },
+    {
+      "name": "user_filter",
+      "type": "query",
+      "query": "label_values(starkpulse_transactions_total, user_address)",
+      "multi": true,
+      "include_all": true
+    },
+    {
+      "name": "risk_threshold",
+      "type": "custom",
+      "default": "500",
+      "options": ["100", "300", "500", "1000", "2000"]
+    }
+  ]
+}
