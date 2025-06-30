@@ -12,6 +12,7 @@ mod AccessControl {
     use starknet::{ContractAddress, get_caller_address};
     use starknet::storage::Map;
     use super::IAccessControl;
+    use crate:interfaces::i_role_management;
     #[storage]
     struct Storage {
         roles: Map<(felt252, ContractAddress), bool>,
@@ -88,6 +89,16 @@ mod AccessControl {
         self.role_admins.write(role, admin_role);
         
             true
+        }
+    }
+
+    #[external(v0)]
+    impl RoleManagementImpl of IRoleManagement {
+        fn setup_roles(self: @ContractState) {
+            // ... existing roles ...
+            self._setup_role('PAUSER', get_caller_address());
+            self._setup_role('FUNCTION_PAUSER', get_caller_address());
+            self._setup_role('AUTO_PAUSER', get_caller_address());
         }
     }
 }

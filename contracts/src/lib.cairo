@@ -10,6 +10,8 @@ mod interfaces {
     pub mod i_error_handling;
     pub mod i_upgradeable;
     pub mod i_security_monitor;
+    pub mod i_pausable;
+    pub mod i_role_management;
 }
 
 // Utility modules
@@ -18,6 +20,7 @@ mod utils {
     pub mod error_handling;
     pub mod crypto_utils;
     pub mod security_monitor;
+    pub mod pausable;
 }
 
 // Proxy modules

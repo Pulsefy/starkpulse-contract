@@ -26,6 +26,8 @@ mod SecurityMonitor {
     use starknet::storage::Map;
     use array::ArrayTrait;
     use zeroable::Zeroable;
+    use crate::utils::pausable::Pausable;
+    use crate::interfaces::i_security_monitor::ISecurityMonitor;
     
     use contracts::src::interfaces::i_security_monitor::{
         ISecurityMonitor, SecurityEvent, AnomalyScore, TransactionPattern, 
@@ -606,6 +608,21 @@ mod SecurityMonitor {
             metrics.append(200);
             
             metrics
+        }
+
+
+        #[only_role('AUTO_PAUSER')]
+        fn check_and_pause(
+            self: @ContractState,
+            target: ContractAddress,
+            anomaly_score: u8
+        ) -> bool {
+            if anomaly_score > 80 {
+                let pausable = IPausableDispatcher { contract_address: target };
+                pausable.pause();
+                return true;
+            }
+            false
         }
     }
 }

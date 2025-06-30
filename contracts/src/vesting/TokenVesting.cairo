@@ -61,6 +61,9 @@ mod TokenVesting {
     use zeroable::Zeroable;
     use contracts::src::utils::contract_metadata::{ContractMetadata, IContractMetadata};
     use array::ArrayTrait;
+
+    use crate::utils::pausable::Pausable;
+    use crate::utils::error_handling::Error;
     
     // Local interfaces
     use crate::interfaces::i_token_vesting::{TokenVestingTypes, ITokenVestingContract};
@@ -257,6 +260,9 @@ mod TokenVesting {
         /// @security Only beneficiary can call. Paused contract blocks release. Revoked schedules cannot release.
         fn release_tokens(ref self: ContractState, schedule_id: u64) {
             self.assert_not_paused();
+
+            self._assert_not_paused(); // Global pause check
+            self._assert_function_not_paused('release');
             
             let caller = get_caller_address();
             let schedule = self.vesting_schedules.read((caller, schedule_id));
