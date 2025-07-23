@@ -392,3 +392,115 @@ trait IPortfolioTracker<T> {
 trait IAnalytics {
     fn track_interaction(ref self: ContractAddress, user: ContractAddress, action_id: felt) -> ();
 }
+
+// Add standardized events to portfolio tracker
+
+#[event]
+#[derive(Drop, starknet::Event)]
+enum Event {
+    AssetAdded: AssetAdded,
+    AssetRemoved: AssetRemoved,
+    AssetUpdated: AssetUpdated,
+    PortfolioSnapshot: PortfolioSnapshot,
+}
+
+#[derive(Drop, starknet::Event)]
+struct AssetAdded {
+    #[key]
+    user: ContractAddress,
+    #[key]
+    asset: ContractAddress,
+    amount: u256,
+    timestamp: u64,
+    correlation_id: felt252,
+}
+
+// In add_asset function
+fn add_asset(
+    ref self: ContractState,
+    asset_address: ContractAddress,
+    amount: u256
+) -> bool {
+    if self._paused.read() {
+        self.emit_error(error_codes::CONTRACT_PAUSED, 'Contract is paused', 0);
+        return false;
+    }
+
+    if asset_address.is_zero() {
+        self.emit_error(error_codes::INVALID_ADDRESS, 'Invalid asset address', 0);
+        return false;
+    }
+
+    // 1) Basic checks
+    let caller = get_caller_address();
+    assert(!caller.is_zero(), 'Invalid caller');
+
+    // 2) Timestamp
+    let ts = get_block_timestamp();
+
+    // 3) Read existing
+    let existing = self.user_assets.read((caller, asset_address));
+
+    // 4) New vs update
+    if existing.address.is_zero() {
+        // New asset entry
+        let a = Asset {
+            address: asset_address,
+            amount,
+            last_updated: ts,
+        };
+        self.user_assets.write((caller, asset_address), a);
+    
+        // Append to asset_list
+        let mut list = self.user_asset_list.read(caller);
+        list.append(asset_address);
+        self.user_asset_list.write(caller, list);
+    } else {
+        // Update existing
+        let updated = Asset {
+            address: asset_address,
+            amount: existing.amount + amount,
+            last_updated: ts,
+        };
+        self.user_assets.write((caller, asset_address), updated);
+    }
+
+    // 5) Analytics: action_id = 1
+    let analytics = IAnalytics::at(ANALYTICS_ADDRESS);
+    analytics.track_interaction(caller, 1).invoke();
+
+    true
+}
+
+// Emit legacy event
+self.emit(AssetAdded {
+    user: caller,
+    asset: asset_address,
+    amount: amount,
+    timestamp: ts,
+    correlation_id: correlation_id,
+});
+
+// Emit standardized event
+let mut event_data = ArrayTrait::new();
+event_data.append(asset_address.into());
+event_data.append(amount.low.into());
+event_data.append(amount.high.into());
+
+let mut indexed_data = ArrayTrait::new();
+indexed_data.append('ASSET_ADD');
+indexed_data.append(caller.into());
+indexed_data.append(asset_address.into());
+
+self.event_system.read().emit_standard_event(
+    'PORTFOLIO_ASSET_ADDED',
+    CATEGORY_PORTFOLIO,
+    SEVERITY_INFO,
+    caller,
+    event_data,
+    indexed_data,
+    correlation_id
+);
+
+true
+}

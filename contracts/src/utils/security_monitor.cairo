@@ -262,6 +262,7 @@ mod SecurityMonitor {
             self.user_anomaly_scores.read(user)
         }
         
+        // Enhanced security events with standardization
         fn log_security_event(
             ref self: ContractState,
             event_type: felt252,
@@ -302,7 +303,40 @@ mod SecurityMonitor {
                 timestamp: get_block_timestamp(),
             });
             
-            event_id.into()
+            // Generate correlation ID
+            let correlation_id = self._generate_correlation_id();
+            
+            // Emit legacy event
+            self.emit(SecurityEventLogged {
+                event_id: event_id,
+                event_type: event_type,
+                severity: severity,
+                user: user,
+                timestamp: get_block_timestamp(),
+            });
+            
+            // Emit standardized event
+            let mut event_data = ArrayTrait::new();
+            event_data.append(transaction_hash);
+            event_data.append(description);
+            event_data.extend(metadata);
+            
+            let mut indexed_data = ArrayTrait::new();
+            indexed_data.append(event_type);
+            indexed_data.append(user.into());
+            indexed_data.append(severity.into());
+            
+            self.event_system.read().emit_standard_event(
+                'SECURITY_EVENT',
+                CATEGORY_SECURITY,
+                severity,
+                user,
+                event_data,
+                indexed_data,
+                correlation_id
+            );
+            
+            event_id
         }
         
         fn get_security_events(
