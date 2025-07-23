@@ -751,3 +751,79 @@ trait IERC20Extended<TContractState> {
 //
 // For integration and more examples, see INTEGRATION_GUIDE.md.
 // -----------------------------------------------------------------------------
+
+// Add to imports
+use crate::interfaces::i_event_system::{IEventSystem, IEventSystemDispatcher, IEventSystemDispatcherTrait};
+use crate::interfaces::i_event_system::{CATEGORY_TRANSACTION, SEVERITY_INFO, SEVERITY_WARNING};
+
+// Add to storage
+struct Storage {
+    _name: felt252,
+    _symbol: felt252,
+    _decimals: u8,
+    _total_supply: u256,
+    _max_supply: u256,
+    _balances: LegacyMap::<ContractAddress, u256>,
+    _allowances: LegacyMap::<(ContractAddress, ContractAddress), u256>,
+    _owner: ContractAddress,
+    _minters: LegacyMap::<ContractAddress, bool>,
+    _paused: bool,
+    _mintable: bool,
+    _burnable: bool
+    event_system: IEventSystemDispatcher,
+}
+
+// Enhanced Transfer event with standardization
+#[derive(Drop, starknet::Event)]
+struct Transfer {
+    #[key]
+    from: ContractAddress,
+    #[key]
+    to: ContractAddress,
+    value: u256,
+    // Enhanced fields
+    #[key]
+    transaction_type: felt252, // 'TRANSFER', 'MINT', 'BURN'
+    correlation_id: felt252,
+    metadata: Array<felt252>,
+}
+
+// In the transfer function, emit both standard and legacy events
+fn transfer(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
+    // Generate correlation ID for this transaction
+    let correlation_id = self._generate_correlation_id();
+    
+    // Emit legacy event for backward compatibility
+    self.emit(Transfer {
+        from: from,
+        to: to,
+        value: amount,
+        transaction_type: 'TRANSFER',
+        correlation_id: correlation_id,
+        metadata: ArrayTrait::new(),
+    });
+    
+    // Emit standardized event
+    let mut event_data = ArrayTrait::new();
+    event_data.append(from.into());
+    event_data.append(to.into());
+    event_data.append(amount.low.into());
+    event_data.append(amount.high.into());
+    
+    let mut indexed_data = ArrayTrait::new();
+    indexed_data.append('TRANSFER');
+    indexed_data.append(from.into());
+    indexed_data.append(to.into());
+    
+    self.event_system.read().emit_standard_event(
+        'TOKEN_TRANSFER',
+        CATEGORY_TRANSACTION,
+        SEVERITY_INFO,
+        from,
+        event_data,
+        indexed_data,
+        correlation_id
+    );
+    
+    true
+}
