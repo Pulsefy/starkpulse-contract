@@ -44,6 +44,7 @@ use starknet::get_block_timestamp;
 // ─────────────────────────────────────────────────────────────────────────────
 use interfaces::i_portfolio_tracker::IPortfolioTracker;
 use interfaces::i_analytics::IAnalytics;
+use crate::interfaces::i_secure_random::{ISecureRandom, ISecureRandomDispatcher};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Aux imports for storage & collections
@@ -74,6 +75,24 @@ struct Storage {
     user_asset_list: LegacyMap::<ContractAddress, Array<ContractAddress>>,
     // admin: Admin address with privileged permissions
     admin: ContractAddress,
+    secure_random: ISecureRandomDispatcher,
+    portfolio_nonces: Map<ContractAddress, felt252>,
+}
+
+// Enhanced portfolio rebalancing with secure randomness
+fn rebalance_portfolio_with_randomness(
+    ref self: ContractState,
+    user: ContractAddress,
+    strategy: felt252
+) {
+    // Generate secure random for rebalancing decisions
+    let random_seed = self.secure_random.read().generate_secure_random(
+        4, // Use all entropy sources
+        'PORTFOLIO_REBALANCE'
+    );
+    
+    // Use randomness for portfolio optimization
+    self._execute_randomized_rebalancing(user, strategy, random_seed);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
