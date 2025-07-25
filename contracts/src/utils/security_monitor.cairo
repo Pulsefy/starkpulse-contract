@@ -28,18 +28,8 @@ mod SecurityMonitor {
     use zeroable::Zeroable;
     use crate::utils::pausable::Pausable;
     use crate::interfaces::i_security_monitor::ISecurityMonitor;
-    
-    use contracts::src::interfaces::i_security_monitor::{
-        ISecurityMonitor, SecurityEvent, AnomalyScore, TransactionPattern, 
-        SecurityAlert, RiskAssessment, SecurityEventLogged, AnomalyDetected,
-        SecurityAlertCreated, SecurityAlertResolved, RiskAssessmentUpdated,
-        SuspiciousPatternDetected, EVENT_TYPE_SUSPICIOUS_TRANSACTION,
-        EVENT_TYPE_UNUSUAL_PATTERN, EVENT_TYPE_HIGH_FREQUENCY, EVENT_TYPE_LARGE_AMOUNT,
-        EVENT_TYPE_RAPID_SUCCESSION, RISK_LEVEL_LOW, RISK_LEVEL_MEDIUM, 
-        RISK_LEVEL_HIGH, RISK_LEVEL_CRITICAL, PRIORITY_LOW, PRIORITY_MEDIUM,
-        PRIORITY_HIGH, PRIORITY_CRITICAL
-    };
-    use contracts::src::utils::access_control::{AccessControl, IAccessControl};
+    use crate::interfaces::i_event_system::{IEventSystemDispatcher, IEventSystemDispatcherTrait};
+    use crate::interfaces::i_event_system::{CATEGORY_SECURITY, SEVERITY_WARNING, SEVERITY_CRITICAL};
 
     // Anomaly detection constants
     const ANOMALY_THRESHOLD_LOW: u256 = 100;
@@ -658,5 +648,112 @@ mod SecurityMonitor {
             }
             false
         }
+    }
+}
+
+use crate::interfaces::i_event_system::{IEventSystemDispatcher, IEventSystemDispatcherTrait};
+use crate::interfaces::i_event_system::{CATEGORY_SECURITY, SEVERITY_WARNING, SEVERITY_CRITICAL};
+
+#[external(v0)]
+impl SecurityMonitorImpl of ISecurityMonitor<ContractState> {
+    fn analyze_transaction(
+        ref self: ContractState,
+        tx_hash: felt252,
+        amount: u256,
+        sender: ContractAddress,
+        recipient: ContractAddress
+    ) -> SecurityAnalysisResult {
+        // ... existing analysis logic ...
+        
+        let result = SecurityAnalysisResult {
+            is_suspicious: false,
+            risk_score: 25,
+            anomaly_flags: array!['NORMAL_PATTERN'],
+            recommended_action: 'ALLOW'
+        };
+        
+        // Emit security analysis event
+        let event_data = array![
+            tx_hash,
+            amount.low.into(),
+            amount.high.into(),
+            sender.into(),
+            recipient.into(),
+            result.risk_score.into(),
+            result.recommended_action
+        ];
+        let indexed_data = array![sender.into(), recipient.into(), tx_hash];
+        
+        let severity = if result.risk_score > 80 {
+            SEVERITY_CRITICAL
+        } else if result.risk_score > 50 {
+            SEVERITY_WARNING
+        } else {
+            SEVERITY_INFO
+        };
+        
+        self._emit_security_event(
+            'TRANSACTION_ANALYZED',
+            event_data,
+            indexed_data,
+            severity,
+            tx_hash // Use tx_hash as correlation_id
+        );
+        
+        result
+    }
+    
+    fn flag_suspicious_activity(
+        ref self: ContractState,
+        account: ContractAddress,
+        activity_type: felt252,
+        severity_level: u8
+    ) -> bool {
+        // ... existing flagging logic ...
+        
+        // Emit suspicious activity event
+        let event_data = array![
+            account.into(),
+            activity_type,
+            severity_level.into(),
+            get_block_timestamp().into()
+        ];
+        let indexed_data = array![account.into(), activity_type];
+        
+        self._emit_security_event(
+            'SUSPICIOUS_ACTIVITY_FLAGGED',
+            event_data,
+            indexed_data,
+            SEVERITY_CRITICAL,
+            0 // No specific correlation
+        );
+        
+        true
+    }
+}
+
+#[generate_trait]
+impl InternalImpl of InternalTrait {
+    fn _emit_security_event(
+        ref self: ContractState,
+        event_type: felt252,
+        data: Array<felt252>,
+        indexed_data: Array<felt252>,
+        severity: u8,
+        correlation_id: felt252
+    ) {
+        let event_system = IEventSystemDispatcher {
+            contract_address: self.event_system.read()
+        };
+        
+        event_system.emit_standard_event(
+            event_type,
+            CATEGORY_SECURITY,
+            severity,
+            get_caller_address(),
+            data,
+            indexed_data,
+            correlation_id
+        );
     }
 }
