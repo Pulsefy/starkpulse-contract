@@ -753,7 +753,7 @@ trait IERC20Extended<TContractState> {
 // -----------------------------------------------------------------------------
 
 // Add to imports
-use crate::interfaces::i_event_system::{IEventSystem, IEventSystemDispatcher, IEventSystemDispatcherTrait};
+use crate::interfaces::i_event_system::{IEventSystemDispatcher, IEventSystemDispatcherTrait};
 use crate::interfaces::i_event_system::{CATEGORY_TRANSACTION, SEVERITY_INFO, SEVERITY_WARNING};
 
 // Add to storage
@@ -826,4 +826,166 @@ fn transfer(ref self: ContractState, to: ContractAddress, amount: u256) -> bool 
     );
     
     true
+}
+
+use crate::interfaces::i_event_system::{IEventSystemDispatcher, IEventSystemDispatcherTrait};
+use crate::interfaces::i_event_system::{CATEGORY_TRANSACTION, SEVERITY_INFO, SEVERITY_WARNING};
+
+#[storage]
+struct Storage {
+    _name: felt252,
+    _symbol: felt252,
+    _decimals: u8,
+    _total_supply: u256,
+    _max_supply: u256,
+    _balances: LegacyMap::<ContractAddress, u256>,
+    _allowances: LegacyMap::<(ContractAddress, ContractAddress), u256>,
+    _owner: ContractAddress,
+    _minters: LegacyMap::<ContractAddress, bool>,
+    _paused: bool,
+    _mintable: bool,
+    _burnable: bool
+    event_system: IEventSystemDispatcher,
+}
+
+#[external(v0)]
+impl IERC20Impl of IERC20<ContractState> {
+    fn transfer(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
+        let caller = get_caller_address();
+        
+        // Check if contract is paused
+        if self._paused.read() {
+            self.emit_error(error_codes::CONTRACT_PAUSED, 'Contract is paused', 0);
+            return false;
+        }
+    
+        // Check for zero address
+        if recipient.is_zero() {
+            self.emit_error(error_codes::INVALID_ADDRESS, 'Cannot transfer to zero address', 0);
+            return false;
+        }
+    
+        // Emit standardized event
+        self._emit_transfer_event(caller, to, amount, 'TRANSFER');
+        
+        true
+    }
+    
+    fn transfer_from(
+        ref self: ContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        amount: u256
+    ) -> bool {
+        // Check allowance if caller is not the sender
+        if caller != sender {
+            let current_allowance = self.allowances.read((sender, caller));
+            assert(current_allowance >= amount, ERROR_INSUFFICIENT_ALLOWANCE);
+            
+            // Update allowance
+            self.allowances.write((sender, caller), current_allowance - amount);
+        }
+        
+        self._transfer(sender, recipient, amount);
+        true
+    }
+    
+    fn approve(ref self: ContractState, spender: ContractAddress, amount: u256) -> bool {
+        let caller = get_caller_address();
+        
+        // Check allowance if caller is not the sender
+        if caller != sender {
+            let current_allowance = self.allowances.read((sender, caller));
+            assert(current_allowance >= amount, ERROR_INSUFFICIENT_ALLOWANCE);
+            
+            // Update allowance
+            self.allowances.write((sender, caller), current_allowance - amount);
+        }
+        
+        self._transfer(sender, recipient, amount);
+        true
+    }
+}
+
+#[external(v0)]
+impl IERC20ExtendedImpl of IERC20Extended<ContractState> {
+    fn mint(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
+        // Check allowance if caller is not the sender
+        if caller != sender {
+            let current_allowance = self.allowances.read((sender, caller));
+            assert(current_allowance >= amount, ERROR_INSUFFICIENT_ALLOWANCE);
+            
+            // Update allowance
+            self.allowances.write((sender, caller), current_allowance - amount);
+        }
+        
+        self._transfer(sender, recipient, amount);
+        true
+    }
+    
+    fn burn(ref self: ContractState, amount: u256) -> bool {
+        let caller = get_caller_address();
+        
+        // Check allowance if caller is not the sender
+        if caller != sender {
+            let current_allowance = self.allowances.read((sender, caller));
+            assert(current_allowance >= amount, ERROR_INSUFFICIENT_ALLOWANCE);
+            
+            // Update allowance
+            self.allowances.write((sender, caller), current_allowance - amount);
+        }
+        
+        self._transfer(sender, recipient, amount);
+        true
+    }
+}
+
+// Internal helper functions
+#[generate_trait]
+impl InternalImpl of InternalTrait {
+    fn _emit_transfer_event(
+        ref self: ContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        amount: u256,
+        transfer_type: felt252
+    ) {
+        let event_data = array![
+            from.into(),
+            to.into(),
+            amount.low.into(),
+            amount.high.into(),
+            transfer_type
+        ];
+        let indexed_data = array![from.into(), to.into()];
+        
+        self._emit_to_event_system(
+            'TOKEN_TRANSFER',
+            event_data,
+            indexed_data,
+            SEVERITY_INFO
+        );
+    }
+    
+    fn _emit_to_event_system(
+        ref self: ContractState,
+        event_type: felt252,
+        data: Array<felt252>,
+        indexed_data: Array<felt252>,
+        severity: u8
+    ) {
+        let event_system = IEventSystemDispatcher {
+            contract_address: self.event_system.read()
+        };
+        
+        event_system.emit_standard_event(
+            event_type,
+            CATEGORY_TRANSACTION,
+            severity,
+            get_caller_address(),
+            data,
+            indexed_data,
+            0 // No correlation for basic token operations
+        );
+    }
 }
