@@ -44,7 +44,22 @@ mod AccessControl {
     #[external(v0)]
     impl AccessControlImpl of IAccessControl<ContractState> {
         fn has_role(self: @ContractState, role: felt252, account: ContractAddress) -> bool {
-            self.roles.read((role, account))
+            // Enhanced: Check both legacy roles and new permission system
+            if self.roles.read((role, account)) {
+                return true;
+            }
+            
+            // Check enhanced permissions
+            let enhanced_dispatcher = IEnhancedAccessControlDispatcher {
+                contract_address: self.enhanced_access_control.read()
+            };
+            
+            enhanced_dispatcher.has_permission(
+                account,
+                'ROLE_SYSTEM',
+                role,
+                PERMISSION_READ
+            )
         }
 
         fn grant_role(ref self: ContractState, role: felt252, account: ContractAddress) -> bool {
@@ -95,7 +110,6 @@ mod AccessControl {
     #[external(v0)]
     impl RoleManagementImpl of IRoleManagement {
         fn setup_roles(self: @ContractState) {
-            // ... existing roles ...
             self._setup_role('PAUSER', get_caller_address());
             self._setup_role('FUNCTION_PAUSER', get_caller_address());
             self._setup_role('AUTO_PAUSER', get_caller_address());
